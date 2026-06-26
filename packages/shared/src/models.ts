@@ -7,6 +7,12 @@ export interface Model {
 
 export const MODELS: Model[] = [
   {
+    id: 'openrouter/owl-alpha',
+    label: 'Owl Alpha',
+    description: 'Free · 1M context · great for agentic tasks',
+    provider: 'openrouter',
+  },
+  {
     id: 'deepseek/deepseek-chat-v4-flash',
     label: 'Nano Flash',
     description: 'Fast & affordable — best for most tasks',

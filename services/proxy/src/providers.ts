@@ -5,6 +5,7 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 function isOpenRouterModel(model: string): boolean {
   return (
+    model.startsWith('openrouter/') ||
     model.startsWith('openai/') ||
     model.startsWith('anthropic/') ||
     model.startsWith('google/') ||
@@ -20,6 +21,11 @@ export async function fetchFromProvider(
   const url = useOpenRouter ? OPENROUTER_URL : DEEPSEEK_URL;
   const apiKey = useOpenRouter ? env.OPENROUTER_KEY : env.DEEPSEEK_KEY;
 
+  // Strip leading "openrouter/" prefix before sending to OpenRouter
+  const upstreamBody = useOpenRouter && body.model.startsWith('openrouter/')
+    ? { ...body, model: body.model.slice('openrouter/'.length) }
+    : body;
+
   const upstream = await fetch(url, {
     method: 'POST',
     headers: {
@@ -32,7 +38,7 @@ export async function fetchFromProvider(
           }
         : {}),
     },
-    body: JSON.stringify({ ...body, stream: true }),
+    body: JSON.stringify({ ...upstreamBody, stream: true }),
   });
 
   // If DeepSeek fails, fall back to OpenRouter
