@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { useAuth } from '../store/useAuth';
 
 const PROXY_URL = import.meta.env.VITE_PROXY_URL || 'https://api.nanobricks.app';
 const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_KEY as string | undefined;
@@ -20,21 +21,31 @@ function normalizeModel(model: string): string {
 }
 
 export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
+  // Dev-only stub (local `pnpm dev`)
   if (import.meta.env.DEV && !import.meta.env.VITE_USE_REAL_PROXY) {
     yield* stubStream(req.messages.at(-1)?.content ?? '');
     return;
   }
 
-  // Direct OpenRouter path — used when VITE_OPENROUTER_KEY is embedded at build time.
-  // Also activates as fallback when there is no real JWT (e.g. developer bypass session).
-  if (OPENROUTER_KEY) {
-    const token = await getJwt();
-    if (!token || req.model.startsWith('openrouter/')) {
+  const isDev = useAuth.getState().isDev;
+
+  // Dev bypass session: use OpenRouter if key is embedded, else stub
+  if (isDev) {
+    if (OPENROUTER_KEY) {
       yield* streamOpenRouter(req);
-      return;
+    } else {
+      yield* devStub();
     }
+    return;
   }
 
+  // Direct OpenRouter path for openrouter/* models when key is embedded
+  if (OPENROUTER_KEY && req.model.startsWith('openrouter/')) {
+    yield* streamOpenRouter(req);
+    return;
+  }
+
+  // Proxy path (requires real Supabase JWT)
   const token = await getJwt();
   if (!token) throw new Error('You need to sign in before sending messages.');
 
@@ -138,6 +149,21 @@ async function* stubStream(prompt: string): AsyncGenerator<string> {
   for (const char of reply) {
     yield char;
     await delay(18);
+  }
+}
+
+async function* devStub(): AsyncGenerator<string> {
+  const reply =
+    `**Developer mode** — OpenRouter key not embedded in this build.\n\n` +
+    `To test real AI responses:\n` +
+    `1. Add \`OPENROUTER_KEY\` secret in GitHub → Settings → Secrets → Actions\n` +
+    `2. Re-trigger the Windows build from GitHub Actions\n` +
+    `3. Install the new build\n\n` +
+    `Everything else in the app works normally.`;
+
+  for (const char of reply) {
+    yield char;
+    await delay(12);
   }
 }
 
