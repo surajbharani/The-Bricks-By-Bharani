@@ -5,4 +5,14 @@ dist/
 .dev.vars
 .DS_Store
 *.log
-pnpm-lock.yaml
+
+# Tauri build output
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/binaries/agent-nano-bricks-*
+
+# PyInstaller build output
+engine/agent-nano-bricks/dist/
+engine/agent-nano-bricks/build/
+engine/agent-nano-bricks/__pycache__/
+engine/agent-nano-bricks/**/__pycache__/
+engine/agent-nano-bricks/*.pyc

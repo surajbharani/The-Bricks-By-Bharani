@@ -69,6 +69,6 @@ export type AgentEvent =
 - [x] P6 swarm (swarm/decompose.py, swarm/scheduler.py)
 - [x] P7 sidecar (serve.py stdio contract, lib.rs Tauri command)
 - [x] P8 timeline dashboard
-- [ ] P9 installers
+- [x] P9 installers (Windows NSIS .exe via GitHub Actions; macOS pending)
 - [ ] P10 razorpay + landing
 - [ ] P11 hardening
