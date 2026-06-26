@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { ModeToggle } from './components/ModeToggle';
 import { SwarmToggle } from './components/SwarmToggle';
@@ -14,8 +13,6 @@ import { useAuth } from './store/useAuth';
 import { useSession } from './store/useSession';
 import { useRun } from './store/useRun';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-import { supabase } from './lib/supabase';
 
 const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -23,24 +20,6 @@ function App() {
   const { session, loading } = useAuth();
   const { mode } = useSession();
   const { resetRun } = useRun();
-
-  // Handle magic-link deep-link: nano-bricks://auth/callback#access_token=...
-  useEffect(() => {
-    if (!IS_TAURI) return;
-    let cleanup: (() => void) | undefined;
-    listen<string>('auth-deep-link', (event) => {
-      const raw = event.payload;
-      const hashIdx = raw.indexOf('#');
-      if (hashIdx === -1) return;
-      const params = new URLSearchParams(raw.slice(hashIdx + 1));
-      const access_token = params.get('access_token');
-      const refresh_token = params.get('refresh_token');
-      if (access_token && refresh_token) {
-        supabase.auth.setSession({ access_token, refresh_token });
-      }
-    }).then((unlisten) => { cleanup = unlisten; });
-    return () => cleanup?.();
-  }, []);
 
   if (loading) {
     return (
