@@ -59,6 +59,8 @@ jobs:
 
       - name: Build React frontend
         working-directory: apps/desktop
+        env:
+          VITE_OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
         run: pnpm build
 
       # ── Rust / Tauri ────────────────────────────────────────────────────────

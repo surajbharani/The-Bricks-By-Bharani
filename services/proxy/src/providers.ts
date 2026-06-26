@@ -5,6 +5,7 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 function isOpenRouterModel(model: string): boolean {
   return (
+    model.startsWith('openrouter/') ||
     model.startsWith('openai/') ||
     model.startsWith('anthropic/') ||
     model.startsWith('google/') ||
