@@ -41,8 +41,7 @@
     "windows": {
       "nsis": {
         "displayLanguageSelector": false,
-        "installMode": "currentUser",
-        "shortcut": true
+        "installMode": "currentUser"
       },
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
