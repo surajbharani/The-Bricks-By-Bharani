@@ -25,10 +25,14 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
     return;
   }
 
-  // Direct OpenRouter path — used when VITE_OPENROUTER_KEY is embedded at build time
-  if (OPENROUTER_KEY && req.model.startsWith('openrouter/')) {
-    yield* streamOpenRouter(req);
-    return;
+  // Direct OpenRouter path — used when VITE_OPENROUTER_KEY is embedded at build time.
+  // Also activates as fallback when there is no real JWT (e.g. developer bypass session).
+  if (OPENROUTER_KEY) {
+    const token = await getJwt();
+    if (!token || req.model.startsWith('openrouter/')) {
+      yield* streamOpenRouter(req);
+      return;
+    }
   }
 
   const token = await getJwt();
