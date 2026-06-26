@@ -62,7 +62,7 @@ export type AgentEvent =
 ## Status log
 - [x] P0 orientation + CLAUDE.md
 - [x] P1 shell (Chat↔Agent, Solo/Swarm, model dropdown, black/red UI)
-- [ ] P2 proxy (Cloudflare Worker)
+- [x] P2 proxy (Cloudflare Worker)
 - [ ] P3 supabase (auth, tiers, usage)
 - [ ] P4 fork+debrand (Agent-Bricks repo)
 - [ ] P5 mindset+solo (Agent-Bricks repo)
