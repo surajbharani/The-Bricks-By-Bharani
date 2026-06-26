@@ -1,0 +1,32 @@
+name = "nano-bricks-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ─── Public vars (non-secret) ────────────────────────────────────────────────
+[vars]
+SUPABASE_URL    = "https://YOUR_PROJECT.supabase.co"   # replace before deploy
+ALERT_EMAIL     = "yashveerbharani@gmail.com"
+APP_ORIGIN      = "https://nanobricks.app"
+
+# ─── KV namespace for per-user rate limiting ─────────────────────────────────
+# Run: wrangler kv:namespace create RATE_LIMIT_KV
+# Then paste the id below
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id      = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# ─── Routes ──────────────────────────────────────────────────────────────────
+[[routes]]
+pattern   = "api.nanobricks.app/*"
+zone_name = "nanobricks.app"
+
+# ─── Secrets (set via CLI, never in this file) ───────────────────────────────
+# wrangler secret put DEEPSEEK_KEY
+# wrangler secret put OPENROUTER_KEY
+# wrangler secret put SUPABASE_JWT_SECRET
+# wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+
+# ─── Local dev overrides ─────────────────────────────────────────────────────
+[dev]
+port = 8787
