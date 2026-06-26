@@ -1,7 +1,9 @@
 import { useSession } from '../store/useSession';
+import { useAuth } from '../store/useAuth';
 
 export function Sidebar() {
   const { messages, clearMessages } = useSession();
+  const { user, signOut } = useAuth();
 
   const sessions = messages.length > 0 ? [{ id: 'current', label: 'Current session' }] : [];
 
@@ -49,13 +51,22 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="px-3 py-3 border-t border-border-hair">
-        <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-bg-elevated transition-colors cursor-pointer">
-          <div className="w-6 h-6 rounded-full bg-bg-elevated border border-border-hair flex items-center justify-center text-[10px] text-text-lo">
-            ?
+        <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg group">
+          <div className="w-6 h-6 rounded-full bg-bg-elevated border border-border-hair flex items-center justify-center text-[10px] text-text-hi font-bold flex-shrink-0">
+            {user?.email?.[0]?.toUpperCase() ?? '?'}
           </div>
-          <div>
-            <p className="text-xs text-text-lo">Not signed in</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-text-hi truncate">{user?.email ?? 'Not signed in'}</p>
           </div>
+          <button
+            onClick={signOut}
+            title="Sign out"
+            className="opacity-0 group-hover:opacity-100 transition-opacity text-text-lo hover:text-red-core"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M5 2H2a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h3M8 9l3-3-3-3M11 6H5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
         </div>
       </div>
     </aside>

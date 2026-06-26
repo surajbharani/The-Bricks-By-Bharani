@@ -5,7 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 # ─── Public vars (non-secret) ────────────────────────────────────────────────
 [vars]
-SUPABASE_URL    = "https://YOUR_PROJECT.supabase.co"   # replace before deploy
+SUPABASE_URL    = "https://txjuhzgnnrfzsmsuexnu.supabase.co"
 ALERT_EMAIL     = "yashveerbharani@gmail.com"
 APP_ORIGIN      = "https://nanobricks.app"
 

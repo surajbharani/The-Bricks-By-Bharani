@@ -1,9 +1,15 @@
-const PROXY_URL = import.meta.env.VITE_PROXY_URL || 'http://localhost:8787';
+import { supabase } from './supabase';
+
+const PROXY_URL = import.meta.env.VITE_PROXY_URL || 'https://api.nanobricks.app';
 
 export interface ChatRequest {
   model: string;
   messages: { role: string; content: string }[];
-  token?: string;
+}
+
+async function getJwt(): Promise<string | null> {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? null;
 }
 
 export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
@@ -12,11 +18,14 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
     return;
   }
 
+  const token = await getJwt();
+  if (!token) throw new Error('You need to sign in before sending messages.');
+
   const res = await fetch(`${PROXY_URL}/v1/chat`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(req.token ? { Authorization: `Bearer ${req.token}` } : {}),
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
       model: req.model,

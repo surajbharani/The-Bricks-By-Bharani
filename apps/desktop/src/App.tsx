@@ -4,8 +4,25 @@ import { SwarmToggle } from './components/SwarmToggle';
 import { ModelDropdown } from './components/ModelDropdown';
 import { ChatStream } from './components/ChatStream';
 import { Composer } from './components/Composer';
+import { AuthGate } from './components/AuthGate';
+import { UsageMeter } from './components/UsageMeter';
+import { useAuth } from './store/useAuth';
 
 function App() {
+  const { session, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-bg-void">
+        <div className="w-2 h-2 rounded-full bg-red-core animate-pulse" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <AuthGate />;
+  }
+
   return (
     <div className="dot-grid flex h-screen w-screen overflow-hidden bg-bg-void">
       <Sidebar />
@@ -17,7 +34,10 @@ function App() {
             <ModeToggle />
             <SwarmToggle />
           </div>
-          <ModelDropdown />
+          <div className="flex items-center gap-2">
+            <UsageMeter />
+            <ModelDropdown />
+          </div>
         </header>
 
         {/* Chat area */}
