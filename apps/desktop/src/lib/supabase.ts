@@ -9,6 +9,8 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     persistSession: true,
     autoRefreshToken: true,
     storageKey: 'nano-bricks-auth',
+    // 30-day session — also set JWT expiry to 2592000s in Supabase Dashboard → Auth → Settings
+    detectSessionInUrl: false,
   },
 });
 
