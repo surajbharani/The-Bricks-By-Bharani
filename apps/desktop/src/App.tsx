@@ -4,12 +4,22 @@ import { SwarmToggle } from './components/SwarmToggle';
 import { ModelDropdown } from './components/ModelDropdown';
 import { ChatStream } from './components/ChatStream';
 import { Composer } from './components/Composer';
+import { RunView } from './components/RunView';
+import { RunHeader } from './components/RunHeader';
+import { AgentComposer } from './components/AgentComposer';
 import { AuthGate } from './components/AuthGate';
 import { UsageMeter } from './components/UsageMeter';
 import { useAuth } from './store/useAuth';
+import { useSession } from './store/useSession';
+import { useRun } from './store/useRun';
+import { invoke } from '@tauri-apps/api/core';
+
+const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 function App() {
   const { session, loading } = useAuth();
+  const { mode } = useSession();
+  const { resetRun } = useRun();
 
   if (loading) {
     return (
@@ -22,6 +32,13 @@ function App() {
   if (!session) {
     return <AuthGate />;
   }
+
+  const handleStop = () => {
+    if (IS_TAURI) invoke('agent_stop').catch(() => {});
+    resetRun();
+  };
+
+  const isAgent = mode === 'agent';
 
   return (
     <div className="dot-grid flex h-screen w-screen overflow-hidden bg-bg-void">
@@ -40,11 +57,20 @@ function App() {
           </div>
         </header>
 
-        {/* Chat area */}
-        <main className="flex flex-col flex-1 min-h-0">
-          <ChatStream />
-          <Composer />
-        </main>
+        {/* Agent mode: timeline dashboard */}
+        {isAgent ? (
+          <main className="flex flex-col flex-1 min-h-0">
+            <RunHeader onStop={handleStop} />
+            <RunView />
+            <AgentComposer />
+          </main>
+        ) : (
+          /* Chat mode */
+          <main className="flex flex-col flex-1 min-h-0">
+            <ChatStream />
+            <Composer />
+          </main>
+        )}
       </div>
     </div>
   );

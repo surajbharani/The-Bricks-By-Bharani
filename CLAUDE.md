@@ -68,7 +68,7 @@ export type AgentEvent =
 - [x] P5 mindset+solo (agent/loop.py, tools/executor.py, providers/proxy.py)
 - [x] P6 swarm (swarm/decompose.py, swarm/scheduler.py)
 - [x] P7 sidecar (serve.py stdio contract, lib.rs Tauri command)
-- [ ] P8 timeline dashboard
+- [x] P8 timeline dashboard
 - [ ] P9 installers
 - [ ] P10 razorpay + landing
 - [ ] P11 hardening
