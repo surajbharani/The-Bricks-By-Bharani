@@ -1,0 +1,12 @@
+{
+  "name": "nano-bricks",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @nano-bricks/desktop dev",
+    "build": "pnpm --filter @nano-bricks/desktop build"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.3"
+  }
+}
