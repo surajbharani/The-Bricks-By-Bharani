@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_shell::ShellExt;
 
 #[derive(serde::Deserialize, Debug)]
@@ -76,6 +77,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_deep_link::init())
+        .setup(|app| {
+            let handle = app.handle().clone();
+            // Forward deep-link URLs to the frontend so auth can complete
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    let _ = handle.emit("auth-deep-link", url.as_str());
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![agent_run, agent_stop])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

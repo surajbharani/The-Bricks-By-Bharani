@@ -35,7 +35,7 @@ export const useAuth = create<AuthState>()((set, get) => ({
       email,
       options: {
         shouldCreateUser: true,
-        emailRedirectTo: undefined, // desktop: no redirect needed
+        emailRedirectTo: 'nano-bricks://auth/callback',
       },
     });
     return { error: error?.message ?? null };
