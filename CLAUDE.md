@@ -64,10 +64,10 @@ export type AgentEvent =
 - [x] P1 shell (Chat↔Agent, Solo/Swarm, model dropdown, black/red UI)
 - [x] P2 proxy (Cloudflare Worker)
 - [x] P3 supabase (auth, tiers, usage)
-- [ ] P4 fork+debrand (Agent-Bricks repo)
-- [ ] P5 mindset+solo (Agent-Bricks repo)
-- [ ] P6 swarm (Agent-Bricks repo)
-- [ ] P7 sidecar (Agent-Bricks repo)
+- [x] P4 fork+debrand (engine/agent-nano-bricks in-repo)
+- [x] P5 mindset+solo (agent/loop.py, tools/executor.py, providers/proxy.py)
+- [x] P6 swarm (swarm/decompose.py, swarm/scheduler.py)
+- [x] P7 sidecar (serve.py stdio contract, lib.rs Tauri command)
 - [ ] P8 timeline dashboard
 - [ ] P9 installers
 - [ ] P10 razorpay + landing
