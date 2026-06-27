@@ -23,6 +23,9 @@ export interface Message {
   streaming?: boolean;
   timestamp: number;
   attachments?: Attachment[];
+  feedback?: 'like' | 'dislike';
+  branches?: string[];    // alternative response texts
+  branchIndex?: number;   // which branch is currently displayed
 }
 
 export interface ThinkingConfig {
@@ -36,6 +39,8 @@ export interface CanvasDoc {
   content: string;
 }
 
+export type ResponseLength = 'auto' | 'short' | 'medium' | 'long';
+
 interface SessionState {
   conversationId: string;
   mode: AppMode;
@@ -46,15 +51,24 @@ interface SessionState {
   thinking: ThinkingConfig;
   canvas: CanvasDoc;
   showCanvas: boolean;
+  responseLength: ResponseLength;
+  regeneratePayload: string | null;
 
   setMode: (mode: AppMode) => void;
   setAgentMode: (agentMode: AgentMode) => void;
   setActiveProject: (id: string | null) => void;
   setModel: (model: string) => void;
+  setResponseLength: (v: ResponseLength) => void;
+  setRegeneratePayload: (v: string | null) => void;
   addMessage: (msg: Omit<Message, 'id' | 'timestamp'>) => string;
   appendToMessage: (id: string, text: string) => void;
   appendReasoning: (id: string, text: string) => void;
   finalizeMessage: (id: string) => void;
+  setFeedback: (id: string, feedback: 'like' | 'dislike') => void;
+  addBranch: (id: string, text: string) => void;
+  setBranchIndex: (id: string, index: number) => void;
+  regenerate: () => void;
+  editAndResend: (userMsgId: string, newContent: string) => void;
   /** Archive current conversation to history, then start fresh */
   newConversation: () => void;
   /** Load a past conversation from history into the active session */
@@ -85,12 +99,16 @@ export const useSession = create<SessionState>()(
       thinking: { enabled: false, showSteps: true, budget: 'fast' },
       canvas: { title: 'Untitled', content: '' },
       showCanvas: false,
+      responseLength: 'auto',
+      regeneratePayload: null,
 
       setMode: (mode) => set({ mode }),
       setAgentMode: (agentMode) => set({ agentMode }),
       setModel: (model) => set({ model }),
+      setResponseLength: (responseLength) => set({ responseLength }),
+      setRegeneratePayload: (regeneratePayload) => set({ regeneratePayload }),
+
       setActiveProject: (id) => {
-        // Save current conversation before switching projects
         const s = get();
         if (s.messages.some((m) => m.role === 'user')) {
           useHistory.getState().upsertConversation({
@@ -135,7 +153,6 @@ export const useSession = create<SessionState>()(
             m.id === id ? { ...m, streaming: false } : m
           ),
         }));
-        // Auto-save conversation to history after each completed AI reply
         const s = get();
         const finalized = s.messages.map((m) =>
           m.id === id ? { ...m, streaming: false } : m
@@ -153,9 +170,61 @@ export const useSession = create<SessionState>()(
         }
       },
 
+      setFeedback: (id, feedback) =>
+        set((s) => ({
+          messages: s.messages.map((m) =>
+            m.id === id ? { ...m, feedback: m.feedback === feedback ? undefined : feedback } : m
+          ),
+        })),
+
+      addBranch: (id, text) =>
+        set((s) => ({
+          messages: s.messages.map((m) => {
+            if (m.id !== id) return m;
+            const branches = m.branches ?? [m.content];
+            const newBranches = [...branches, text];
+            return { ...m, branches: newBranches, branchIndex: newBranches.length - 1, content: text };
+          }),
+        })),
+
+      setBranchIndex: (id, index) =>
+        set((s) => ({
+          messages: s.messages.map((m) => {
+            if (m.id !== id || !m.branches) return m;
+            const clamped = Math.max(0, Math.min(index, m.branches.length - 1));
+            return { ...m, branchIndex: clamped, content: m.branches[clamped] };
+          }),
+        })),
+
+      regenerate: () => {
+        const s = get();
+        const msgs = s.messages;
+        // Find last user message (not streaming)
+        let lastUserContent = '';
+        let lastAsstIdx = -1;
+        for (let i = msgs.length - 1; i >= 0; i--) {
+          if (msgs[i].role === 'assistant' && lastAsstIdx < 0) lastAsstIdx = i;
+          if (msgs[i].role === 'user' && !msgs[i].streaming) {
+            lastUserContent = msgs[i].content;
+            break;
+          }
+        }
+        if (!lastUserContent || lastAsstIdx < 0) return;
+        set({
+          messages: msgs.filter((_, i) => i !== lastAsstIdx),
+          regeneratePayload: lastUserContent,
+        });
+      },
+
+      editAndResend: (userMsgId, newContent) => {
+        const s = get();
+        const idx = s.messages.findIndex((m) => m.id === userMsgId);
+        if (idx < 0) return;
+        set({ messages: s.messages.slice(0, idx), regeneratePayload: newContent });
+      },
+
       newConversation: () => {
         const s = get();
-        // Save current conversation before clearing (if it has any messages)
         if (s.messages.some((m) => m.role === 'user')) {
           useHistory.getState().upsertConversation({
             id: s.conversationId,
@@ -172,7 +241,6 @@ export const useSession = create<SessionState>()(
 
       loadConversation: (id) => {
         const s = get();
-        // Save current conversation before switching (if it has messages)
         if (s.messages.some((m) => m.role === 'user')) {
           useHistory.getState().upsertConversation({
             id: s.conversationId,
@@ -211,11 +279,12 @@ export const useSession = create<SessionState>()(
         mode: s.mode,
         agentMode: s.agentMode,
         model: s.model,
-        // Persist active messages so the current in-progress chat survives restart
         messages: s.messages.map((m) => ({ ...m, streaming: false })),
         thinking: s.thinking,
         canvas: s.canvas,
         showCanvas: s.showCanvas,
+        responseLength: s.responseLength,
+        // Never persist regeneratePayload
       }),
     }
   )

@@ -2,7 +2,7 @@ import {
   useState, useRef, useEffect, useCallback, type KeyboardEvent, type ReactNode,
 } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useSession, type Attachment } from '../store/useSession';
+import { useSession, type Attachment, type ResponseLength } from '../store/useSession';
 import { streamChat, modelSupportsVision, type ContentBlock } from '../lib/proxyClient';
 import { useProjects } from '../store/useProjects';
 import { useMemory } from '../store/useMemory';
@@ -188,7 +188,11 @@ export function Composer() {
     messages,
     addMessage, appendToMessage, appendReasoning, finalizeMessage, setStreaming, isStreaming,
     updateCanvas,
+    responseLength, setResponseLength,
+    regeneratePayload, setRegeneratePayload,
   } = useSession();
+
+  const [showLengthMenu, setShowLengthMenu] = useState(false);
 
   const { projects, activeProjectId } = useProjects();
   const { settings: memSettings, facts } = useMemory();
@@ -303,7 +307,77 @@ export function Composer() {
     abortRef.current = null;
   };
 
+  // ── Regenerate watcher ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (regeneratePayload) {
+      setRegeneratePayload(null);
+      sendWithText(regeneratePayload);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regeneratePayload]);
+
   // ── Send ────────────────────────────────────────────────────────────────────
+  const sendWithText = async (forcedText: string) => {
+    if (isStreaming) return;
+    const trimmed = forcedText.trim();
+    if (!trimmed) return;
+
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    const asstMsgId = addMessage({ role: 'assistant', content: '', streaming: true });
+    setStreaming(true);
+
+    const systemParts: string[] = [];
+    const lengthHint: Record<string, string> = {
+      short: 'Keep your response brief and concise (1–3 short paragraphs or less).',
+      medium: 'Give a moderately detailed response (3–6 paragraphs).',
+      long: 'Give a thorough, comprehensive response with full detail.',
+    };
+    if (lengthHint[responseLength]) systemParts.push(lengthHint[responseLength]);
+    if (memSettings.globalSystemPrompt) systemParts.push(memSettings.globalSystemPrompt);
+    if (memSettings.memoryEnabled && facts.length) {
+      systemParts.push(`[What I remember about you]\n${facts.map((f) => `- ${f.text}`).join('\n')}`);
+    }
+    if (activeProject?.systemPrompt) systemParts.push(activeProject.systemPrompt);
+    if (activeProject?.memory) systemParts.push(`[Project memory]\n${activeProject.memory}`);
+    if (activeProject?.files && activeProject.files.length > 0) {
+      systemParts.push(activeProject.files.map((f) => `[File: ${f.name}]\n${f.text}`).join('\n\n'));
+    }
+
+    const historyMsgs = messages
+      .filter((m) => !m.streaming && m.content)
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    const systemMsg = systemParts.length > 0
+      ? [{ role: 'system' as const, content: systemParts.join('\n\n') }]
+      : [];
+
+    try {
+      const gen = streamChat({
+        model,
+        messages: [...systemMsg, ...historyMsgs, { role: 'user', content: trimmed }],
+        signal: ctrl.signal,
+      });
+      for await (const chunk of gen) {
+        if (ctrl.signal.aborted) break;
+        if (chunk.kind === 'reasoning') {
+          appendReasoning(asstMsgId, chunk.text);
+        } else {
+          appendToMessage(asstMsgId, chunk.text);
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name !== 'AbortError') {
+        appendToMessage(asstMsgId, `\n\n*Error: ${err.message}*`);
+      }
+    } finally {
+      finalizeMessage(asstMsgId);
+      setStreaming(false);
+      abortRef.current = null;
+    }
+  };
+
   const send = async () => {
     const trimmed = text.trim();
     if ((!trimmed && attachments.length === 0) || isStreaming) return;
@@ -369,6 +443,12 @@ export function Composer() {
 
     // Build system context (global instructions + memory + project)
     const systemParts: string[] = [];
+    const lengthHint: Record<string, string> = {
+      short: 'Keep your response brief and concise (1–3 short paragraphs or less).',
+      medium: 'Give a moderately detailed response (3–6 paragraphs).',
+      long: 'Give a thorough, comprehensive response with full detail.',
+    };
+    if (lengthHint[responseLength]) systemParts.push(lengthHint[responseLength]);
     if (memSettings.globalSystemPrompt) systemParts.push(memSettings.globalSystemPrompt);
     if (memSettings.memoryEnabled && facts.length) {
       systemParts.push(`[What I remember about you]\n${facts.map((f) => `- ${f.text}`).join('\n')}`);
@@ -583,7 +663,32 @@ export function Composer() {
               )}
             </div>
 
-            {/* Right: send / stop button */}
+            {/* Right: length pill + send / stop button */}
+            <div className="flex items-center gap-1.5">
+              {/* Response length pill */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowLengthMenu((v) => !v)}
+                  className="flex items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-medium text-text-lo hover:text-text-hi border border-border-hair hover:border-red-core/30 transition-colors"
+                >
+                  {responseLength === 'auto' ? 'Auto' : responseLength.charAt(0).toUpperCase() + responseLength.slice(1)}
+                  <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M4 5.5L1 2.5h6L4 5.5z"/></svg>
+                </button>
+                {showLengthMenu && (
+                  <div className="absolute bottom-full mb-1 right-0 bg-bg-panel border border-border-hair rounded-xl overflow-hidden shadow-xl z-20 min-w-[90px]">
+                    {(['auto', 'short', 'medium', 'long'] as ResponseLength[]).map((opt) => (
+                      <button
+                        key={opt}
+                        onClick={() => { setResponseLength(opt); setShowLengthMenu(false); }}
+                        className={`w-full text-left px-3 py-1.5 text-[11px] transition-colors ${responseLength === opt ? 'text-red-core bg-red-core/10' : 'text-text-lo hover:text-text-hi hover:bg-bg-elevated'}`}
+                      >
+                        {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
             <motion.button
               onClick={isStreaming ? stopStreaming : send}
               disabled={!isStreaming && !canSend}
@@ -596,6 +701,7 @@ export function Composer() {
             >
               {isStreaming ? <StopIcon /> : <SendIcon />}
             </motion.button>
+            </div>
           </div>
         </div>
 

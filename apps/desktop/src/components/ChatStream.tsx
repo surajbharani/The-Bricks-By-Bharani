@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useSession, type Message, type ThinkingConfig } from '../store/useSession';
 import { CoTSection } from './CoTSection';
+import { CodeBlock } from './CodeBlock';
 
 export function ChatStream() {
-  const { messages, thinking } = useSession();
+  const { messages, thinking, setFeedback, setBranchIndex, regenerate, editAndResend, isStreaming } = useSession();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -35,11 +38,23 @@ export function ChatStream() {
     );
   }
 
+  const lastAsstIdx = messages.map((m) => m.role).lastIndexOf('assistant');
+
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
       <AnimatePresence initial={false}>
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} thinking={thinking} />
+        {messages.map((msg, idx) => (
+          <MessageBubble
+            key={msg.id}
+            msg={msg}
+            thinking={thinking}
+            isLastAssistant={idx === lastAsstIdx}
+            isStreaming={isStreaming}
+            onFeedback={(f) => setFeedback(msg.id, f)}
+            onBranch={(i) => setBranchIndex(msg.id, i)}
+            onRegenerate={regenerate}
+            onEditAndResend={(newText) => editAndResend(msg.id, newText)}
+          />
         ))}
       </AnimatePresence>
       <div ref={bottomRef} />
@@ -47,23 +62,48 @@ export function ChatStream() {
   );
 }
 
-// ── Single message bubble ─────────────────────────────────────────────────────
-function MessageBubble({ msg, thinking }: { msg: Message; thinking: ThinkingConfig }) {
+// ── Message bubble ────────────────────────────────────────────────────────────
+
+interface BubbleProps {
+  msg: Message;
+  thinking: ThinkingConfig;
+  isLastAssistant: boolean;
+  isStreaming: boolean;
+  onFeedback: (f: 'like' | 'dislike') => void;
+  onBranch: (i: number) => void;
+  onRegenerate: () => void;
+  onEditAndResend: (text: string) => void;
+}
+
+function MessageBubble({ msg, thinking, isLastAssistant, isStreaming, onFeedback, onBranch, onRegenerate, onEditAndResend }: BubbleProps) {
   const isUser = msg.role === 'user';
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editText, setEditText] = useState(msg.content);
 
   const speak = () => {
     if (!window.speechSynthesis) return;
-    if (isSpeaking) {
-      window.speechSynthesis.cancel();
-      setIsSpeaking(false);
-      return;
-    }
+    if (isSpeaking) { window.speechSynthesis.cancel(); setIsSpeaking(false); return; }
     const utterance = new SpeechSynthesisUtterance(msg.content);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
     window.speechSynthesis.speak(utterance);
     setIsSpeaking(true);
+  };
+
+  const copyMsg = async () => {
+    await navigator.clipboard.writeText(msg.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const branchCount = msg.branches?.length ?? 1;
+  const branchIdx = msg.branchIndex ?? 0;
+
+  const submitEdit = () => {
+    if (editText.trim()) onEditAndResend(editText.trim());
+    setEditing(false);
   };
 
   return (
@@ -79,25 +119,18 @@ function MessageBubble({ msg, thinking }: { msg: Message; thinking: ThinkingConf
         </div>
       )}
 
-      <div className="max-w-[75%] flex flex-col gap-1.5">
+      <div className="max-w-[78%] flex flex-col gap-1.5">
         {/* Image attachments */}
         {msg.attachments?.filter((a) => a.type === 'image' && a.dataUrl).map((att, i) => (
-          <img
-            key={i}
-            src={att.dataUrl}
-            alt={att.name}
-            className="rounded-xl max-w-[260px] max-h-[200px] object-cover border border-border-hair"
-          />
+          <img key={i} src={att.dataUrl} alt={att.name}
+            className="rounded-xl max-w-[260px] max-h-[200px] object-cover border border-border-hair" />
         ))}
 
-        {/* File / Search badges */}
+        {/* File / search badges */}
         {msg.attachments?.filter((a) => a.type !== 'image').length ? (
           <div className="flex flex-wrap gap-1.5">
             {msg.attachments.filter((a) => a.type !== 'image').map((att, i) => (
-              <span
-                key={i}
-                className="inline-flex items-center gap-1 px-2 py-0.5 bg-bg-panel border border-border-hair rounded-full text-xs text-text-lo"
-              >
+              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-bg-panel border border-border-hair rounded-full text-xs text-text-lo">
                 {att.type === 'file' ? '📄' : att.type === 'search' ? '🔍' : '▶'}
                 {att.name}
               </span>
@@ -105,39 +138,163 @@ function MessageBubble({ msg, thinking }: { msg: Message; thinking: ThinkingConf
           </div>
         ) : null}
 
-        {/* Text bubble */}
-        <div
-          className={`relative px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-            isUser
-              ? 'bg-bg-elevated border border-border-hair text-text-hi rounded-br-sm'
-              : 'bg-bg-panel border border-border-hair text-text-hi rounded-bl-sm'
-          }`}
-        >
-          <span className="whitespace-pre-wrap break-words">{msg.content}</span>
-          {msg.streaming && <span className="caret" />}
+        {/* Edit mode (user messages) */}
+        {editing ? (
+          <div className="flex flex-col gap-2">
+            <textarea
+              autoFocus
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit(); } if (e.key === 'Escape') setEditing(false); }}
+              rows={3}
+              className="w-full bg-bg-elevated border border-red-core/40 rounded-xl px-3 py-2 text-sm text-text-hi focus:outline-none resize-none"
+            />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setEditing(false)} className="px-3 py-1 text-xs text-text-lo hover:text-text-hi border border-border-hair rounded-lg transition-colors">Cancel</button>
+              <button onClick={submitEdit} className="px-3 py-1 text-xs bg-red-core text-white rounded-lg hover:bg-red-core/90 transition-colors">Re-send</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Text bubble */}
+            <div className={`relative px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+              isUser
+                ? 'bg-bg-elevated border border-border-hair text-text-hi rounded-br-sm'
+                : 'bg-bg-panel border border-border-hair text-text-hi rounded-bl-sm'
+            }`}>
+              {isUser ? (
+                <span className="whitespace-pre-wrap break-words">{msg.content}</span>
+              ) : (
+                <div className="prose prose-invert prose-sm max-w-none
+                  prose-p:my-1 prose-p:leading-relaxed
+                  prose-headings:text-text-hi prose-headings:font-semibold
+                  prose-a:text-red-core prose-a:no-underline hover:prose-a:underline
+                  prose-strong:text-text-hi prose-strong:font-semibold
+                  prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5
+                  prose-blockquote:border-red-core/40 prose-blockquote:text-text-lo
+                  prose-hr:border-border-hair
+                  prose-table:text-xs prose-th:text-text-lo prose-td:text-text-hi
+                ">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      code(props: any) {
+                        const { children, className } = props;
+                        const lang = /language-(\w+)/.exec(className || '')?.[1] ?? '';
+                        const isBlock = className?.includes('language-') || String(children).includes('\n');
+                        if (!isBlock) {
+                          return <code className="bg-bg-elevated px-1.5 py-0.5 rounded text-red-core/90 font-mono text-[0.82em]">{children}</code>;
+                        }
+                        return <CodeBlock language={lang} code={String(children).replace(/\n$/, '')} />;
+                      },
+                    }}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                </div>
+              )}
+              {msg.streaming && <span className="caret" />}
+            </div>
 
-          {/* TTS button on assistant messages */}
+            {/* Chain-of-thought */}
+            {!isUser && msg.reasoning && thinking.showSteps && (
+              <CoTSection text={msg.reasoning} />
+            )}
 
-          {!isUser && !msg.streaming && msg.content && (
-            <button
-              onClick={speak}
-              title={isSpeaking ? 'Stop speaking' : 'Read aloud'}
-              className="absolute -bottom-2 -right-2 w-6 h-6 rounded-full bg-bg-elevated border border-border-hair flex items-center justify-center opacity-0 group-hover:opacity-100 hover:!opacity-100 transition-opacity"
-              style={{ opacity: 0 }}
-              onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
-              onMouseLeave={(e) => { if (!isSpeaking) e.currentTarget.style.opacity = '0'; }}
-            >
-              <SpeakerIcon speaking={isSpeaking} />
-            </button>
-          )}
-        </div>
+            {/* Action bar */}
+            {!msg.streaming && (
+              <div className={`flex items-center gap-0.5 ${isUser ? 'justify-end' : 'justify-start'}`}>
+                {/* Copy */}
+                <ActionBtn title={copied ? 'Copied!' : 'Copy'} onClick={copyMsg}>
+                  {copied
+                    ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#28C76F" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  }
+                </ActionBtn>
 
-        {/* Chain-of-thought reasoning (collapsible) */}
-        {!isUser && msg.reasoning && thinking.showSteps && (
-          <CoTSection text={msg.reasoning} />
+                {/* User-only: edit */}
+                {isUser && (
+                  <ActionBtn title="Edit & re-send" onClick={() => { setEditText(msg.content); setEditing(true); }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                    </svg>
+                  </ActionBtn>
+                )}
+
+                {/* Assistant-only actions */}
+                {!isUser && (
+                  <>
+                    {/* Like */}
+                    <ActionBtn title="Good response" onClick={() => onFeedback('like')} active={msg.feedback === 'like'}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill={msg.feedback === 'like' ? '#FF1F2E' : 'none'} stroke={msg.feedback === 'like' ? '#FF1F2E' : 'currentColor'} strokeWidth="2" strokeLinecap="round">
+                        <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/>
+                        <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
+                      </svg>
+                    </ActionBtn>
+
+                    {/* Dislike */}
+                    <ActionBtn title="Bad response" onClick={() => onFeedback('dislike')} active={msg.feedback === 'dislike'}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill={msg.feedback === 'dislike' ? '#FF1F2E' : 'none'} stroke={msg.feedback === 'dislike' ? '#FF1F2E' : 'currentColor'} strokeWidth="2" strokeLinecap="round">
+                        <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/>
+                        <path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
+                      </svg>
+                    </ActionBtn>
+
+                    {/* TTS */}
+                    <ActionBtn title={isSpeaking ? 'Stop speaking' : 'Read aloud'} onClick={speak} active={isSpeaking}>
+                      <SpeakerIcon speaking={isSpeaking} />
+                    </ActionBtn>
+
+                    {/* Regenerate — only on last assistant message */}
+                    {isLastAssistant && !isStreaming && (
+                      <ActionBtn title="Regenerate response" onClick={onRegenerate}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                          <polyline points="1 4 1 10 7 10"/>
+                          <path d="M3.51 15a9 9 0 1 0 .49-3.76"/>
+                        </svg>
+                      </ActionBtn>
+                    )}
+
+                    {/* Branch navigator */}
+                    {branchCount > 1 && (
+                      <div className="flex items-center gap-0.5 ml-1">
+                        <ActionBtn title="Previous version" onClick={() => onBranch(branchIdx - 1)} disabled={branchIdx === 0}>
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+                        </ActionBtn>
+                        <span className="text-[9px] text-text-lo">{branchIdx + 1}/{branchCount}</span>
+                        <ActionBtn title="Next version" onClick={() => onBranch(branchIdx + 1)} disabled={branchIdx === branchCount - 1}>
+                          <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+                        </ActionBtn>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
     </motion.div>
+  );
+}
+
+// ── Action button ─────────────────────────────────────────────────────────────
+function ActionBtn({ children, title, onClick, active, disabled }: {
+  children: React.ReactNode; title: string; onClick: () => void; active?: boolean; disabled?: boolean;
+}) {
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-6 h-6 rounded-md flex items-center justify-center transition-colors disabled:opacity-30 ${
+        active ? 'text-red-core bg-red-core/10' : 'text-text-lo hover:text-text-hi hover:bg-bg-elevated'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

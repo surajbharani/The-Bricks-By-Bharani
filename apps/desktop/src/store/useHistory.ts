@@ -6,10 +6,13 @@ import type { Message } from './useSession';
 
 export interface Conversation {
   id: string;
-  title: string;      // first user message, truncated
+  title: string;
   messages: Message[];
   model: string;
   projectId?: string;
+  pinned?: boolean;
+  archived?: boolean;
+  folder?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -31,6 +34,7 @@ interface HistoryState {
   agentRuns: AgentRunRecord[];
 
   upsertConversation: (conv: Conversation) => void;
+  updateConversationMeta: (id: string, patch: Partial<Pick<Conversation, 'title' | 'pinned' | 'archived' | 'folder'>>) => void;
   deleteConversation: (id: string) => void;
   saveAgentRun: (run: Omit<AgentRunRecord, 'id' | 'createdAt'>) => void;
   deleteAgentRun: (id: string) => void;
@@ -48,11 +52,24 @@ export const useHistory = create<HistoryState>()(
           const idx = s.conversations.findIndex((c) => c.id === conv.id);
           if (idx >= 0) {
             const updated = [...s.conversations];
-            updated[idx] = conv;
+            // Preserve meta fields that aren't in the auto-saved conv object
+            updated[idx] = {
+              pinned: updated[idx].pinned,
+              archived: updated[idx].archived,
+              folder: updated[idx].folder,
+              ...conv,
+            };
             return { conversations: updated };
           }
           return { conversations: [conv, ...s.conversations] };
         }),
+
+      updateConversationMeta: (id, patch) =>
+        set((s) => ({
+          conversations: s.conversations.map((c) =>
+            c.id === id ? { ...c, ...patch } : c
+          ),
+        })),
 
       deleteConversation: (id) =>
         set((s) => ({ conversations: s.conversations.filter((c) => c.id !== id) })),
@@ -72,13 +89,12 @@ export const useHistory = create<HistoryState>()(
     }),
     {
       name: 'nano-bricks-history',
-      // Strip base64 image data from archived messages to avoid exceeding localStorage quota
       partialize: (s) => ({
         conversations: s.conversations.map((c) => ({
           ...c,
           messages: c.messages.map((m) => ({
             ...m,
-            streaming: false, // never persist streaming state
+            streaming: false,
             attachments: m.attachments?.map((a) =>
               a.type === 'image'
                 ? { ...a, dataUrl: undefined }
