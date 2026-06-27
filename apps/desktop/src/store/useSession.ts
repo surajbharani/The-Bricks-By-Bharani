@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_MODEL } from '@nano-bricks/shared';
+import { useHistory } from './useHistory';
 
 export type AppMode = 'chat' | 'agent';
 export type AgentMode = 'solo' | 'swarm';
@@ -35,6 +36,7 @@ export interface CanvasDoc {
 }
 
 interface SessionState {
+  conversationId: string;
   mode: AppMode;
   agentMode: AgentMode;
   model: string;
@@ -51,6 +53,10 @@ interface SessionState {
   appendToMessage: (id: string, text: string) => void;
   appendReasoning: (id: string, text: string) => void;
   finalizeMessage: (id: string) => void;
+  /** Archive current conversation to history, then start fresh */
+  newConversation: () => void;
+  /** Load a past conversation from history into the active session */
+  loadConversation: (id: string) => void;
   clearMessages: () => void;
   setStreaming: (v: boolean) => void;
   setThinking: (patch: Partial<ThinkingConfig>) => void;
@@ -58,9 +64,17 @@ interface SessionState {
   updateCanvas: (patch: Partial<CanvasDoc>) => void;
 }
 
+function makeId() { return crypto.randomUUID(); }
+
+function deriveTitle(messages: Message[]): string {
+  const first = messages.find((m) => m.role === 'user' && m.content.trim());
+  return first ? first.content.slice(0, 60) : 'New conversation';
+}
+
 export const useSession = create<SessionState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
+      conversationId: makeId(),
       mode: 'chat',
       agentMode: 'solo',
       model: DEFAULT_MODEL,
@@ -75,7 +89,7 @@ export const useSession = create<SessionState>()(
       setModel: (model) => set({ model }),
 
       addMessage: (msg) => {
-        const id = crypto.randomUUID();
+        const id = makeId();
         set((s) => ({
           messages: [...s.messages, { ...msg, id, timestamp: Date.now() }],
         }));
@@ -96,14 +110,59 @@ export const useSession = create<SessionState>()(
           ),
         })),
 
-      finalizeMessage: (id) =>
+      finalizeMessage: (id) => {
         set((s) => ({
           messages: s.messages.map((m) =>
             m.id === id ? { ...m, streaming: false } : m
           ),
-        })),
+        }));
+        // Auto-save conversation to history after each completed AI reply
+        const s = get();
+        const finalized = s.messages.map((m) =>
+          m.id === id ? { ...m, streaming: false } : m
+        );
+        if (finalized.some((m) => m.role === 'user')) {
+          useHistory.getState().upsertConversation({
+            id: s.conversationId,
+            title: deriveTitle(finalized),
+            messages: finalized,
+            model: s.model,
+            createdAt: finalized[0]?.timestamp ?? Date.now(),
+            updatedAt: Date.now(),
+          });
+        }
+      },
 
-      clearMessages: () => set({ messages: [] }),
+      newConversation: () => {
+        const s = get();
+        // Save current conversation before clearing (if it has any messages)
+        if (s.messages.some((m) => m.role === 'user')) {
+          useHistory.getState().upsertConversation({
+            id: s.conversationId,
+            title: deriveTitle(s.messages),
+            messages: s.messages,
+            model: s.model,
+            createdAt: s.messages[0]?.timestamp ?? Date.now(),
+            updatedAt: Date.now(),
+          });
+        }
+        set({ conversationId: makeId(), messages: [], isStreaming: false });
+      },
+
+      loadConversation: (id) => {
+        const conv = useHistory.getState().conversations.find((c) => c.id === id);
+        if (!conv) return;
+        set({
+          conversationId: conv.id,
+          messages: conv.messages,
+          model: conv.model,
+          isStreaming: false,
+          mode: 'chat',
+        });
+      },
+
+      clearMessages: () => set({ messages: [], isStreaming: false }),
+
       setStreaming: (isStreaming) => set({ isStreaming }),
       setThinking: (patch) =>
         set((s) => ({ thinking: { ...s.thinking, ...patch } })),
@@ -114,9 +173,12 @@ export const useSession = create<SessionState>()(
     {
       name: 'nano-bricks-session',
       partialize: (s) => ({
+        conversationId: s.conversationId,
         mode: s.mode,
         agentMode: s.agentMode,
         model: s.model,
+        // Persist active messages so the current in-progress chat survives restart
+        messages: s.messages.map((m) => ({ ...m, streaming: false })),
         thinking: s.thinking,
         canvas: s.canvas,
         showCanvas: s.showCanvas,
