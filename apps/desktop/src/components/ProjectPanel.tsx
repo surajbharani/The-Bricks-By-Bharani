@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useProjects, type Project } from '../store/useProjects';
+import { useProjects } from '../store/useProjects';
 import { useSession } from '../store/useSession';
 import { ProjectModal } from './ProjectModal';
 
@@ -7,7 +7,9 @@ export function ProjectPanel() {
   const { projects, activeProjectId, setActiveProject, deleteProject } = useProjects();
   const { newConversation } = useSession();
   const [showModal, setShowModal] = useState(false);
-  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  // Store only the id so the modal always receives a live project object from the store
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const editingProject = editingProjectId ? (projects.find((p) => p.id === editingProjectId) ?? null) : null;
 
   const activate = (id: string | null) => {
     setActiveProject(id);
@@ -21,7 +23,7 @@ export function ProjectPanel() {
           Projects
         </p>
         <button
-          onClick={() => { setEditingProject(null); setShowModal(true); }}
+          onClick={() => { setEditingProjectId(null); setShowModal(true); }}
           title="New project"
           className="text-text-lo hover:text-red-core transition-colors"
         >
@@ -68,7 +70,7 @@ export function ProjectPanel() {
             </div>
             <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 flex-shrink-0">
               <button
-                onClick={(e) => { e.stopPropagation(); setEditingProject(p); setShowModal(true); }}
+                onClick={(e) => { e.stopPropagation(); setEditingProjectId(p.id); setShowModal(true); }}
                 title="Edit project"
                 className="text-text-lo hover:text-text-hi transition-colors p-0.5"
               >
@@ -89,7 +91,7 @@ export function ProjectPanel() {
       {showModal && (
         <ProjectModal
           project={editingProject}
-          onClose={() => setShowModal(false)}
+          onClose={() => { setShowModal(false); setEditingProjectId(null); }}
         />
       )}
     </>

@@ -9,6 +9,11 @@ interface Props {
 export function ProjectModal({ project, onClose }: Props) {
   const { createProject, updateProject, addProjectFile, removeProjectFile, setActiveProject } = useProjects();
 
+  // Reactively read files from store so adding/removing files re-renders the list
+  const liveFiles = useProjects((s) =>
+    project ? (s.projects.find((p) => p.id === project.id)?.files ?? []) : []
+  );
+
   const [name, setName] = useState(project?.name ?? '');
   const [description, setDescription] = useState(project?.description ?? '');
   const [systemPrompt, setSystemPrompt] = useState(project?.systemPrompt ?? '');
@@ -16,8 +21,7 @@ export function ProjectModal({ project, onClose }: Props) {
   const [tab, setTab] = useState<'general' | 'files' | 'memory'>('general');
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Keep local files in sync when editing
-  const files: ProjectFile[] = project ? useProjects.getState().projects.find((p) => p.id === project.id)?.files ?? [] : [];
+  const files: ProjectFile[] = liveFiles;
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -53,7 +57,7 @@ export function ProjectModal({ project, onClose }: Props) {
 
   const TABS = [
     { key: 'general', label: 'General' },
-    { key: 'files', label: `Files${project?.files?.length ? ` (${project.files.length})` : ''}` },
+    { key: 'files', label: `Files${files.length ? ` (${files.length})` : ''}` },
     { key: 'memory', label: 'Memory' },
   ] as const;
 
