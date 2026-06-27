@@ -21,6 +21,12 @@ export const MODELS: Model[] = [
     reasoning: true,
   },
   {
+    id: 'openrouter/owl-alpha',
+    label: 'Owl Alpha',
+    description: "OpenRouter's own model — fast and capable",
+    provider: 'openrouter',
+  },
+  {
     id: 'openrouter/google/gemini-2.0-flash-exp:free',
     label: 'Gemini Flash',
     description: 'Free · 1M context · great for agentic tasks',
