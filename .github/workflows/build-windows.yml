@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version string (e.g. 0.1.0)'
+        description: 'Version string (e.g. 0.1.1)'
         required: false
-        default: '0.1.0'
+        default: '0.1.1'
 
 jobs:
   build-windows:
@@ -20,6 +20,16 @@ jobs:
       # ── Checkout ───────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # ── Stamp version into tauri.conf.json ────────────────────────────────
+      - name: Set version
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version || '0.1.1' }}"
+          VERSION="${VERSION#v}"
+          echo "Building version $VERSION"
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" apps/desktop/src-tauri/tauri.conf.json
+          cat apps/desktop/src-tauri/tauri.conf.json | grep '"version"'
 
       # ── Python sidecar (PyInstaller) ───────────────────────────────────────
       - name: Set up Python 3.12
@@ -83,9 +93,6 @@ jobs:
       - name: Build Tauri Windows installer
         working-directory: apps/desktop
         env:
-          # Optional: set signing secrets in GitHub → Settings → Secrets
-          # TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          # TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
           VITE_GOOGLE_SEARCH_KEY: ${{ secrets.GOOGLE_SEARCH_KEY }}
