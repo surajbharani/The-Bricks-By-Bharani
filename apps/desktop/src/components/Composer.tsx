@@ -2,11 +2,14 @@ import {
   useState, useRef, useEffect, useCallback, type KeyboardEvent, type ReactNode,
 } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useSession, type Attachment, type ResponseLength } from '../store/useSession';
+import { useSession, type Attachment, type ResponseLength, type WebSource } from '../store/useSession';
 import { useToast } from '../store/useToast';
 import { streamChat, modelSupportsVision, type ContentBlock } from '../lib/proxyClient';
 import { useProjects } from '../store/useProjects';
 import { useMemory } from '../store/useMemory';
+import { useTools } from '../store/useTools';
+import { searchWeb, formatResultsAsContext } from '../lib/webSearch';
+import { generateImage, IMAGE_MODELS, type ImageModel } from '../lib/imageGen';
 
 import {
   googleSearch, youtubeSearch,
@@ -187,7 +190,7 @@ export function Composer() {
   const {
     mode, agentMode, model,
     messages,
-    addMessage, appendToMessage, appendReasoning, finalizeMessage, setStreaming, isStreaming,
+    addMessage, appendToMessage, appendReasoning, updateMessage, finalizeMessage, setStreaming, isStreaming,
     updateCanvas,
     responseLength, setResponseLength,
     regeneratePayload, setRegeneratePayload,
@@ -210,6 +213,7 @@ export function Composer() {
   const { projects, activeProjectId } = useProjects();
   const { settings: memSettings, facts } = useMemory();
   const { addToast, removeToast } = useToast();
+  const { isEnabled } = useTools();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
 
   const [text, setText]             = useState('');
@@ -220,6 +224,10 @@ export function Composer() {
   const [isSearching, setIsSearching] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [visionWarn, setVisionWarn] = useState(false);
+  const [activeMode, setActiveMode] = useState<'web' | 'image' | null>(null);
+  const [showPlusMenu, setShowPlusMenu] = useState(false);
+  const [imgModel, setImgModel] = useState<ImageModel>('openai/dall-e-3');
+  const plusMenuRef = useRef<HTMLDivElement>(null);
 
   const textareaRef  = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -250,6 +258,23 @@ export function Composer() {
     const hasImage = attachments.some((a) => a.type === 'image');
     setVisionWarn(hasImage && !modelSupportsVision(model));
   }, [attachments, model]);
+
+  // Close plus menu on outside click
+  useEffect(() => {
+    if (!showPlusMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (plusMenuRef.current && !plusMenuRef.current.contains(e.target as Node)) setShowPlusMenu(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showPlusMenu]);
+
+  // ESC dismisses active mode
+  useEffect(() => {
+    const handler = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') { setActiveMode(null); setShowPlusMenu(false); } };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // ── Voice Input ─────────────────────────────────────────────────────────────
   const toggleVoice = () => {
@@ -346,8 +371,6 @@ export function Composer() {
     const trimmed = forcedText.trim();
     if (!trimmed) return;
 
-    // Ensure the user message is visible in the store.
-    // After regenerate() the user msg is already there; after editAndResend() it was sliced away.
     const latestMsgs = messages.filter((m) => !m.streaming);
     const lastMsg = latestMsgs[latestMsgs.length - 1];
     if (!lastMsg || lastMsg.role !== 'user' || lastMsg.content !== trimmed) {
@@ -371,8 +394,6 @@ export function Composer() {
       systemParts.push(activeProject.files.map((f) => `[File: ${f.name}]\n${f.text}`).join('\n\n'));
     }
 
-    // Build history, stripping any trailing user message to avoid duplication
-    // (regenerate() leaves the user msg in the store; we append it explicitly below)
     const allHistory = latestMsgs
       .filter((m) => m.content)
       .map((m) => ({ role: m.role, content: m.content }));
@@ -417,7 +438,6 @@ export function Composer() {
       setStreaming(false);
       abortRef.current = null;
       removeToast(thinkingToastIdSWT);
-      // Only show success toast if not aborted and no error
       if (!swtErrored && !ctrl.signal.aborted) {
         addToast({ message: 'Response ready', type: 'success', duration: 2500 });
       }
@@ -427,6 +447,64 @@ export function Composer() {
   const send = async () => {
     const trimmed = text.trim();
     if ((!trimmed && attachments.length === 0) || isStreaming) return;
+
+    // ── Web search mode ──────────────────────────────────────────────────────
+    if (activeMode === 'web' && trimmed) {
+      setActiveMode(null);
+      setText('');
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      addMessage({ role: 'user', content: trimmed });
+      const asstMsgId = addMessage({
+        role: 'assistant', content: '', streaming: true,
+        attachments: [{ type: 'web-search', webStatus: 'searching', query: trimmed, sources: [] }],
+      });
+      setStreaming(true);
+      let sources: WebSource[] = [];
+      try {
+        await new Promise((r) => setTimeout(r, 500));
+        updateMessage(asstMsgId, { attachments: [{ type: 'web-search', webStatus: 'reading', query: trimmed, sources: [] }] });
+        const results = await searchWeb(trimmed);
+        sources = results as WebSource[];
+        updateMessage(asstMsgId, { attachments: [{ type: 'web-search', webStatus: 'answering', query: trimmed, sources }] });
+        await new Promise((r) => setTimeout(r, 200));
+        const context = formatResultsAsContext(trimmed, results);
+        const histMsgs = messages.filter((m) => !m.streaming && m.content).map((m) => ({ role: m.role, content: m.content }));
+        const gen = streamChat({ model, messages: [...histMsgs, { role: 'user', content: context }] });
+        for await (const chunk of gen) appendToMessage(asstMsgId, chunk.text);
+      } catch (err) {
+        appendToMessage(asstMsgId, `\n\n*Search error: ${err instanceof Error ? err.message : 'Unknown error'}*`);
+      } finally {
+        updateMessage(asstMsgId, { streaming: false, attachments: [{ type: 'web-search', webStatus: 'done', query: trimmed, sources }] });
+        finalizeMessage(asstMsgId);
+        setStreaming(false);
+      }
+      return;
+    }
+
+    // ── Image generation mode ────────────────────────────────────────────────
+    if (activeMode === 'image' && trimmed) {
+      setActiveMode(null);
+      setText('');
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      addMessage({ role: 'user', content: trimmed });
+      const asstMsgId = addMessage({ role: 'assistant', content: 'Generating image…', streaming: true });
+      setStreaming(true);
+      try {
+        const PROXY_BASE = import.meta.env.VITE_PROXY_URL ?? 'https://api.nanobricks.app';
+        const url = await generateImage(trimmed, imgModel, '', PROXY_BASE);
+        updateMessage(asstMsgId, {
+          content: '',
+          streaming: false,
+          attachments: [{ type: 'image-gen', url, prompt: trimmed }],
+        });
+      } catch (err) {
+        updateMessage(asstMsgId, { content: `*Image generation failed: ${err instanceof Error ? err.message : 'Unknown error'}*`, streaming: false });
+      } finally {
+        finalizeMessage(asstMsgId);
+        setStreaming(false);
+      }
+      return;
+    }
 
     // Snapshot attachments before clearing state
     const snap = [...attachments];
@@ -564,7 +642,7 @@ export function Composer() {
   const removeAttachment = (idx: number) =>
     setAttachments((prev) => prev.filter((_, i) => i !== idx));
 
-  const canSend = (text.trim().length > 0 || attachments.length > 0) && !isStreaming;
+  const canSend = (text.trim().length > 0 || attachments.length > 0) && !isStreaming && !(activeMode && !text.trim());
 
   return (
     <>
@@ -663,6 +741,78 @@ export function Composer() {
           <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
             {/* Left: tool buttons */}
             <div className="flex items-center gap-1">
+              {/* + button with dropdown */}
+              <div className="relative" ref={plusMenuRef}>
+                <button
+                  aria-label="Open tools menu"
+                  onClick={() => setShowPlusMenu((v) => !v)}
+                  className="w-7 h-7 rounded-md flex items-center justify-center text-text-lo hover:text-text-hi transition-colors"
+                  style={{ background: showPlusMenu ? '#FF1F2E22' : 'transparent', color: showPlusMenu ? '#FF1F2E' : undefined }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <line x1="7" y1="1" x2="7" y2="13"/><line x1="1" y1="7" x2="13" y2="7"/>
+                  </svg>
+                </button>
+                <AnimatePresence>
+                  {showPlusMenu && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 4, scale: 0.96 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 4, scale: 0.96 }}
+                      transition={{ duration: 0.12 }}
+                      className="absolute bottom-full mb-2 left-0 bg-bg-panel border border-border-hair rounded-xl shadow-xl z-30 overflow-hidden min-w-[180px]"
+                    >
+                      {isEnabled('web_search') && (
+                        <button
+                          onClick={() => { setActiveMode(activeMode === 'web' ? null : 'web'); setShowPlusMenu(false); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-text-lo hover:text-text-hi hover:bg-bg-elevated transition-colors"
+                        >
+                          <span>🔍</span><span>Web Search</span>
+                        </button>
+                      )}
+                      {isEnabled('image_gen') && (
+                        <button
+                          onClick={() => { setActiveMode(activeMode === 'image' ? null : 'image'); setShowPlusMenu(false); }}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-text-lo hover:text-text-hi hover:bg-bg-elevated transition-colors"
+                        >
+                          <span>🎨</span><span>Image Generation</span>
+                        </button>
+                      )}
+                      {isEnabled('code_runner') && (
+                        <div className="px-3 py-2 text-xs text-text-lo opacity-50">▶ Code Runner — click ▶ in code blocks</div>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Mode pill */}
+              <AnimatePresence>
+                {activeMode && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    className="flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-xs font-medium"
+                    style={{ borderColor: '#FF1F2E44', background: '#FF1F2E11', color: '#FF1F2E' }}
+                  >
+                    {activeMode === 'web' ? '🔍 Web Search mode' : '🎨 Image Generation mode'}
+                    {activeMode === 'image' && (
+                      <select
+                        value={imgModel}
+                        onChange={(e) => setImgModel(e.target.value as ImageModel)}
+                        className="ml-1 text-[10px] bg-transparent border-none outline-none cursor-pointer"
+                        style={{ color: '#FF1F2E' }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {IMAGE_MODELS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                      </select>
+                    )}
+                    <button onClick={() => setActiveMode(null)} className="ml-1 opacity-60 hover:opacity-100">✕</button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               <ToolBtn
                 title={isListening ? 'Stop listening' : 'Voice input (mic)'}
                 active={isListening}
