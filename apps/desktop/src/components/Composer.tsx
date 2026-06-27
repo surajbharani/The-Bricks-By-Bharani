@@ -87,8 +87,8 @@ export function Composer() {
   }, []);
 
   const placeholder =
-    activeMode === 'web'   ? 'Type your question — web results will be searched automatically…' :
-    activeMode === 'image' ? 'Describe the image you want to generate…' :
+    activeMode === 'web'   ? 'Type your question and press send…' :
+    activeMode === 'image' ? 'Describe the image you want to generate and press send…' :
     mode === 'chat'        ? 'Ask anything…' :
     agentMode === 'swarm'  ? 'Describe a task — your Team will tackle it in parallel…' :
                              'Describe a task — your agent will plan and execute it…';
@@ -263,7 +263,7 @@ export function Composer() {
               <div className="flex items-center gap-2 px-3 py-2 bg-red-core/10 border border-red-core/30 rounded-xl">
                 <span className="text-sm">{activeMode === 'web' ? '🔍' : '🎨'}</span>
                 <span className="text-xs font-semibold text-red-core">
-                  {activeMode === 'web' ? 'Web Search mode — type your question and press send' : 'Image Generation mode — describe the image and press send'}
+                  {activeMode === 'web' ? 'Web Search mode' : 'Image Generation mode'}
                 </span>
 
                 {/* Model picker for image gen */}
