@@ -118,8 +118,8 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
             />
           ) : (
             <>
-              <p className={`text-xs truncate leading-snug ${isActive ? 'text-text-hi' : 'text-text-lo'}`}>{conv.title}</p>
-              <p className="text-[9px] text-text-lo mt-0.5">{relativeTime(conv.updatedAt)}</p>
+              <p className={`truncate leading-snug ${isActive ? 'text-text-hi' : 'text-text-lo'}`} style={{ fontSize: 'calc(var(--chat-font-size, 14px) - 2px)' }}>{conv.title}</p>
+              <p className="text-text-lo mt-0.5" style={{ fontSize: 'calc(var(--chat-font-size, 14px) - 5px)' }}>{relativeTime(conv.updatedAt)}</p>
             </>
           )}
         </div>

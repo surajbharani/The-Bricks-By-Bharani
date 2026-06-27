@@ -716,8 +716,8 @@ export function Composer() {
               placeholder={placeholder}
               rows={1}
               disabled={isStreaming}
-              className="w-full resize-none bg-transparent text-sm text-text-hi placeholder-text-lo outline-none leading-relaxed"
-              style={{ fontFamily: 'var(--display)', maxHeight: '160px' }}
+              className="w-full resize-none bg-transparent text-text-hi placeholder-text-lo outline-none leading-relaxed"
+              style={{ fontFamily: 'var(--display)', maxHeight: '160px', fontSize: 'var(--chat-font-size, 14px)' }}
             />
           </div>
 
