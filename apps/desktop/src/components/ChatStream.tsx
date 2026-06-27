@@ -119,7 +119,7 @@ function MessageBubble({ msg, thinking, isLastAssistant, isStreaming, onFeedback
         </div>
       )}
 
-      <div className="max-w-[78%] flex flex-col gap-1.5">
+      <div className="flex flex-col gap-1.5" style={{ maxWidth: 'var(--msg-max-w, 78%)' }}>
         {/* Web search block (Perplexity-style) */}
         {msg.attachments?.find((a) => a.type === 'web-search') && (
           <WebSearchBlock att={msg.attachments.find((a) => a.type === 'web-search')!} message={msg} />
@@ -170,11 +170,18 @@ function MessageBubble({ msg, thinking, isLastAssistant, isStreaming, onFeedback
         ) : (
           <>
             {/* Text bubble */}
-            <div className={`relative px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-              isUser
-                ? 'bg-bg-elevated border border-border-hair text-text-hi rounded-br-sm'
-                : 'bg-bg-panel border border-border-hair text-text-hi rounded-bl-sm'
-            }`}>
+            <div
+              className={`relative rounded-2xl leading-relaxed ${
+                isUser
+                  ? 'bg-bg-elevated border border-border-hair text-text-hi rounded-br-sm'
+                  : 'bg-bg-panel border border-border-hair text-text-hi rounded-bl-sm'
+              }`}
+              style={{
+                padding: 'var(--bubble-py, 0.75rem) var(--bubble-px, 1rem)',
+                fontSize: 'var(--chat-font-size, 14px)',
+                fontFamily: 'var(--chat-font-family, var(--display), "Nunito", system-ui, sans-serif)',
+              }}
+            >
               {isUser ? (
                 <span className="whitespace-pre-wrap break-words">{msg.content}</span>
               ) : (
