@@ -6,6 +6,7 @@ type Theme = 'dark' | 'light';
 interface ThemeState {
   theme: Theme;
   toggleTheme: () => void;
+  setTheme: (t: Theme) => void;
 }
 
 export const useTheme = create<ThemeState>()(
@@ -13,6 +14,7 @@ export const useTheme = create<ThemeState>()(
     (set) => ({
       theme: 'dark',
       toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+      setTheme: (t) => set({ theme: t }),
     }),
     { name: 'nano-bricks-theme' }
   )

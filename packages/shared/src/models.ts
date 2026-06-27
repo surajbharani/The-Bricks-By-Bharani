@@ -3,6 +3,7 @@ export interface Model {
   label: string;
   description: string;
   provider: 'deepseek' | 'openrouter';
+  reasoning?: boolean;
 }
 
 export const MODELS: Model[] = [
@@ -23,6 +24,7 @@ export const MODELS: Model[] = [
     label: 'Nano Think',
     description: 'Deep reasoning — best for complex problems',
     provider: 'deepseek',
+    reasoning: true,
   },
   {
     id: 'openai/gpt-4o',

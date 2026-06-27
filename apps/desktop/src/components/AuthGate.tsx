@@ -3,13 +3,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../store/useAuth';
 
 type Tab = 'signin' | 'signup';
-type Step = 'form' | 'otp' | 'done';
+type Step = 'form' | 'confirm_sent';
 
 const DEV_USER = 'developer';
 const DEV_PASS = 'Pagalpanti@123';
 
 export function AuthGate() {
-  const { signInWithPassword, signUp, verifyOtp, devSignIn } = useAuth();
+  const { signInWithPassword, signUp, devSignIn } = useAuth();
 
   const [tab, setTab] = useState<Tab>('signin');
   const [step, setStep] = useState<Step>('form');
@@ -17,10 +17,8 @@ export function AuthGate() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
-  const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Dev bypass panel state
+  // Dev bypass panel
   const [showDev, setShowDev] = useState(false);
   const [devUser, setDevUser] = useState('');
   const [devPass, setDevPass] = useState('');
@@ -28,22 +26,16 @@ export function AuthGate() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const pendingEmail = useRef('');
+  const sentEmail = useRef('');
 
   const resetForm = () => {
     setError('');
     setPassword('');
     setConfirmPassword('');
-    setOtp(['', '', '', '', '', '']);
     setStep('form');
   };
 
-  const handleTabChange = (t: Tab) => {
-    setTab(t);
-    resetForm();
-  };
-
-  // ── Sign In ──────────────────────────────────────────────────────────────
+  // ── Sign In ───────────────────────────────────────────────────────────────
   const handleSignIn = async () => {
     if (!email.trim() || !password) return;
     setBusy(true);
@@ -51,16 +43,12 @@ export function AuthGate() {
     const { error: err } = await signInWithPassword(email.trim().toLowerCase(), password);
     setBusy(false);
     if (err) {
-      setError(
-        err.toLowerCase().includes('invalid') || err.toLowerCase().includes('credentials')
-          ? 'Wrong email or password. Please try again.'
-          : err
-      );
+      setError('Wrong email or password. Please try again.');
     }
-    // On success Supabase fires onAuthStateChange → App unmounts AuthGate automatically
+    // On success Supabase auth state change → App unmounts AuthGate
   };
 
-  // ── Sign Up ──────────────────────────────────────────────────────────────
+  // ── Sign Up ───────────────────────────────────────────────────────────────
   const handleSignUp = async () => {
     if (!email.trim() || !password) return;
     if (password !== confirmPassword) {
@@ -73,45 +61,19 @@ export function AuthGate() {
     }
     setBusy(true);
     setError('');
-    const { error: err, needsOtp } = await signUp(email.trim().toLowerCase(), password);
+    const { error: err } = await signUp(email.trim().toLowerCase(), password);
     setBusy(false);
     if (err) {
       setError(err);
       return;
     }
-    if (needsOtp) {
-      pendingEmail.current = email.trim().toLowerCase();
-      setStep('otp');
-    }
-    // if !needsOtp, auth state changed and we're in
+    // Supabase sends a confirmation link to the email.
+    // Tauri catches nano-bricks://auth/callback and fires auth-deep-link → session set.
+    sentEmail.current = email.trim().toLowerCase();
+    setStep('confirm_sent');
   };
 
-  // ── OTP verify ───────────────────────────────────────────────────────────
-  const handleVerifyOtp = async () => {
-    const code = otp.join('');
-    if (code.length < 6) return;
-    setBusy(true);
-    setError('');
-    const { error: err } = await verifyOtp(pendingEmail.current, code);
-    setBusy(false);
-    if (err) {
-      setError('Invalid or expired code. Please try again.');
-      setOtp(['', '', '', '', '', '']);
-      otpRefs.current[0]?.focus();
-    }
-    // on success Supabase fires auth state change
-  };
-
-  const handleOtpKey = (i: number, val: string) => {
-    if (!/^\d?$/.test(val)) return;
-    const next = [...otp];
-    next[i] = val;
-    setOtp(next);
-    if (val && i < 5) otpRefs.current[i + 1]?.focus();
-    if (!val && i > 0) otpRefs.current[i - 1]?.focus();
-  };
-
-  // ── Dev bypass ───────────────────────────────────────────────────────────
+  // ── Dev bypass ────────────────────────────────────────────────────────────
   const handleDevLogin = () => {
     if (devUser === DEV_USER && devPass === DEV_PASS) {
       devSignIn();
@@ -120,9 +82,8 @@ export function AuthGate() {
     }
   };
 
-  const btnActive = !busy && (tab === 'signup'
-    ? email.trim() && password && confirmPassword
-    : email.trim() && password);
+  const signInReady = !busy && email.trim() && password;
+  const signUpReady = !busy && email.trim() && password && confirmPassword;
 
   return (
     <div className="flex h-screen w-screen items-center justify-center bg-bg-void dot-grid">
@@ -145,49 +106,33 @@ export function AuthGate() {
         <div className="bg-bg-panel border border-border-hair rounded-2xl p-6">
           <AnimatePresence mode="wait">
 
-            {/* ── OTP step ── */}
-            {step === 'otp' ? (
-              <motion.div key="otp" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <h2 className="text-base font-semibold text-text-hi font-display mb-1">Check your email</h2>
-                <p className="text-sm text-text-lo mb-5">
-                  We sent a 6-digit code to{' '}
-                  <span className="text-text-hi">{pendingEmail.current}</span>. Enter it below.
-                </p>
-
-                <div className="flex gap-2 justify-center mb-4">
-                  {otp.map((digit, i) => (
-                    <input
-                      key={i}
-                      ref={(el) => { otpRefs.current[i] = el; }}
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={1}
-                      value={digit}
-                      onChange={(e) => handleOtpKey(i, e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Backspace' && !otp[i] && i > 0) otpRefs.current[i - 1]?.focus();
-                        if (e.key === 'Enter' && otp.join('').length === 6) handleVerifyOtp();
-                      }}
-                      autoFocus={i === 0}
-                      className="w-11 h-12 text-center text-lg font-bold rounded-xl bg-bg-elevated border border-border-hair text-text-hi outline-none focus:border-red-core/60 focus:shadow-red-glow transition-all duration-150"
-                    />
-                  ))}
+            {/* ── Confirmation sent step ── */}
+            {step === 'confirm_sent' ? (
+              <motion.div
+                key="confirm"
+                initial={{ opacity: 0, scale: 0.97 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0 }}
+                className="text-center py-4"
+              >
+                <div className="w-12 h-12 rounded-full bg-ok/10 border border-ok/30 flex items-center justify-center mx-auto mb-4">
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <path d="M2 10l5 5L18 4" stroke="#28C76F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
                 </div>
-
-                {error && <p className="text-xs text-red-core mb-3 text-center">{error}</p>}
-
-                <RedButton
-                  onClick={handleVerifyOtp}
-                  disabled={!btnIsReady(otp.join(''), 6) || busy}
-                  busy={busy}
-                  label="Verify & sign in"
-                />
-
+                <h2 className="text-base font-semibold text-text-hi font-display mb-2">Check your inbox</h2>
+                <p className="text-sm text-text-lo leading-relaxed mb-1">
+                  We sent a confirmation link to
+                </p>
+                <p className="text-sm text-text-hi font-medium mb-4">{sentEmail.current}</p>
+                <p className="text-xs text-text-lo leading-relaxed opacity-80">
+                  Click the link in that email to confirm your account. The app will open automatically and sign you in.
+                </p>
                 <button
-                  onClick={() => { setStep('form'); setOtp(['', '', '', '', '', '']); setError(''); }}
-                  className="w-full mt-3 text-xs text-text-lo hover:text-text-hi transition-colors text-center"
+                  onClick={() => { resetForm(); setTab('signup'); }}
+                  className="mt-5 text-xs text-text-lo hover:text-text-hi transition-colors"
                 >
-                  ← Go back
+                  ← Use a different email
                 </button>
               </motion.div>
 
@@ -200,7 +145,7 @@ export function AuthGate() {
                   {(['signin', 'signup'] as Tab[]).map((t) => (
                     <button
                       key={t}
-                      onClick={() => handleTabChange(t)}
+                      onClick={() => { setTab(t); resetForm(); }}
                       className="flex-1 py-2 text-sm font-semibold rounded-lg transition-all duration-150 font-display"
                       style={{
                         background: tab === t ? 'linear-gradient(135deg, #FF1F2E, #8E0E16)' : 'transparent',
@@ -262,14 +207,19 @@ export function AuthGate() {
 
                 <RedButton
                   onClick={tab === 'signin' ? handleSignIn : handleSignUp}
-                  disabled={!btnActive}
+                  disabled={!(tab === 'signin' ? signInReady : signUpReady)}
                   busy={busy}
                   label={tab === 'signin' ? 'Sign in →' : 'Create account →'}
                 />
 
                 {tab === 'signup' && (
                   <p className="text-center text-xs text-text-lo mt-4 opacity-60">
-                    New accounts get a free Casual plan automatically.
+                    New accounts get a free Casual plan. Confirmation email will be sent.
+                  </p>
+                )}
+                {tab === 'signin' && (
+                  <p className="text-center text-xs text-text-lo mt-4 opacity-60">
+                    Don't have an account? Switch to Sign up above.
                   </p>
                 )}
               </motion.div>
@@ -277,7 +227,7 @@ export function AuthGate() {
           </AnimatePresence>
         </div>
 
-        {/* Developer Check — hidden at launch */}
+        {/* Developer Check — removed at official launch */}
         <div className="bg-bg-panel border border-border-hair rounded-2xl overflow-hidden">
           <button
             onClick={() => { setShowDev((v) => !v); setError(''); }}
@@ -334,17 +284,8 @@ export function AuthGate() {
   );
 }
 
-function btnIsReady(val: string, len: number) {
-  return val.length >= len;
-}
-
-function RedButton({
-  onClick, disabled, busy, label,
-}: {
-  onClick: () => void;
-  disabled: boolean;
-  busy: boolean;
-  label: string;
+function RedButton({ onClick, disabled, busy, label }: {
+  onClick: () => void; disabled: boolean; busy: boolean; label: string;
 }) {
   return (
     <motion.button

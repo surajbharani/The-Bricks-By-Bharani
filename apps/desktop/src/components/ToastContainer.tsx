@@ -19,6 +19,7 @@ function ToastItem({ toast }: { toast: Toast }) {
   const { removeToast } = useToast();
 
   useEffect(() => {
+    // duration === 0 means "never auto-dismiss"; undefined defaults to 4000 ms
     if (toast.duration === 0) return;
     const ms = toast.duration ?? 4000;
     const timer = setTimeout(() => removeToast(toast.id), ms);

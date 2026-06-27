@@ -104,6 +104,21 @@ html, body, #root {
   vertical-align: text-bottom;
 }
 
+/* Print: only show canvas content, hide everything else */
+@media print {
+  body > #root > .dot-grid > *:not(.canvas-print-root) { display: none !important; }
+  .no-print { display: none !important; }
+  .canvas-print {
+    position: fixed;
+    inset: 0;
+    overflow: visible;
+    background: white;
+    color: black;
+    padding: 2cm;
+    font-size: 12pt;
+  }
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   * {

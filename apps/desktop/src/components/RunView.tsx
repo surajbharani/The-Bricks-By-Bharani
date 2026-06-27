@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRun } from '../store/useRun';
 import { useSession } from '../store/useSession';
+import { useHistory } from '../store/useHistory';
 import { TimelineNode } from './TimelineNode';
 import { TokenStream } from './TokenStream';
 import { SwarmLane } from './SwarmLane';
@@ -11,12 +12,31 @@ import { SummaryChip } from './SummaryChip';
 export function RunView() {
   const { status, query, plan, thinking, steps, subagents, tokenStream, files, summary, errorMsg, tokensUsed, inr } =
     useRun();
-  const { agentMode } = useSession();
+  const { agentMode, model } = useSession();
+  const { saveAgentRun } = useHistory();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const savedRef = useRef(false);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [steps.length, tokenStream.length, Object.keys(subagents).length, files.length, status]);
+
+  // Save completed/failed agent runs to persistent history
+  useEffect(() => {
+    if ((status === 'done' || status === 'error') && query && !savedRef.current) {
+      savedRef.current = true;
+      saveAgentRun({
+        query,
+        summary: summary || errorMsg || '',
+        status,
+        tokensUsed,
+        model,
+      });
+    }
+    if (status === 'idle' || status === 'planning' || status === 'running') {
+      savedRef.current = false;
+    }
+  }, [status, query, summary, errorMsg, tokensUsed, model, saveAgentRun]);
 
   if (status === 'idle') {
     return (

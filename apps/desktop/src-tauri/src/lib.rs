@@ -10,6 +10,7 @@ pub struct AgentRunRequest {
     pub model: String,
     pub workspace: Option<String>,
     pub token: String,
+    pub openrouter_key: Option<String>,
     pub caps: serde_json::Value,
 }
 
@@ -26,12 +27,13 @@ async fn agent_run(app: AppHandle, request: AgentRunRequest) -> Result<(), Strin
     std::fs::create_dir_all(&workspace).ok();
 
     let req_json = serde_json::json!({
-        "query":     request.query,
-        "mode":      request.mode,
-        "model":     request.model,
-        "workspace": workspace.to_string_lossy(),
-        "token":     request.token,
-        "caps":      request.caps,
+        "query":          request.query,
+        "mode":           request.mode,
+        "model":          request.model,
+        "workspace":      workspace.to_string_lossy(),
+        "token":          request.token,
+        "openrouter_key": request.openrouter_key.unwrap_or_default(),
+        "caps":           request.caps,
     })
     .to_string();
 

@@ -1,266 +1,557 @@
 import {
-  useState, useRef, useEffect, useCallback, type KeyboardEvent,
+  useState, useRef, useEffect, useCallback, type KeyboardEvent, type ReactNode,
 } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useSession, type Attachment, type WebSource } from '../store/useSession';
-import { useTools } from '../store/useTools';
+import { useSession, type Attachment, type ResponseLength } from '../store/useSession';
 import { useToast } from '../store/useToast';
-import { streamChat } from '../lib/proxyClient';
-import { searchWeb, formatResultsAsContext } from '../lib/webSearch';
-import { generateImage, IMAGE_MODELS, type ImageModel } from '../lib/imageGen';
-import { supabase } from '../lib/supabase';
+import { streamChat, modelSupportsVision, type ContentBlock } from '../lib/proxyClient';
+import { useProjects } from '../store/useProjects';
+import { useMemory } from '../store/useMemory';
 
-const PROXY_BASE = import.meta.env.VITE_PROXY_URL ?? 'https://api.nanobricks.app';
+import {
+  googleSearch, youtubeSearch,
+  formatSearchContext, formatYouTubeContext,
+  hasGoogleSearch, hasYouTubeSearch,
+} from '../lib/search';
 
-// ── File text extraction (PDF / DOCX / CSV / TXT) ────────────────────────────
+// Static ?url import so Vite bundles the worker file and rewrites the path correctly
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+// ── PDF / DOCX / CSV extraction ───────────────────────────────────────────────
+async function extractPdf(file: File): Promise<string> {
+  const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist');
+  GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+  const buf = await file.arrayBuffer();
+  const pdf = await getDocument({ data: buf }).promise;
+  const parts: string[] = [];
+  for (let i = 1; i <= Math.min(pdf.numPages, 30); i++) {
+    const page = await pdf.getPage(i);
+    const tc = await page.getTextContent();
+    parts.push(tc.items.map((it) => ('str' in it ? it.str : '')).join(' '));
+  }
+  return parts.join('\n');
+}
+
+async function extractDocx(file: File): Promise<string> {
+  // Vite wraps CJS packages — default export lives at .default
+  const mod = await import('mammoth');
+  const mammoth = (mod.default ?? mod) as { extractRawText: (o: { arrayBuffer: ArrayBuffer }) => Promise<{ value: string }> };
+  const buf = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer: buf });
+  return result.value;
+}
+
 async function extractFileText(file: File): Promise<string> {
   const name = file.name.toLowerCase();
-  if (name.endsWith('.pdf')) {
-    const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist');
-    const pdfWorkerUrl = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
-    GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-    const buf = await file.arrayBuffer();
-    const pdf = await getDocument({ data: buf }).promise;
-    const parts: string[] = [];
-    for (let i = 1; i <= Math.min(pdf.numPages, 30); i++) {
-      const page = await pdf.getPage(i);
-      const tc = await page.getTextContent();
-      parts.push(tc.items.map((it) => ('str' in it ? it.str : '')).join(' '));
-    }
-    return parts.join('\n');
-  }
-  if (name.endsWith('.docx')) {
-    const mod = await import('mammoth');
-    const mammoth = (mod.default ?? mod) as {
-      extractRawText: (o: { arrayBuffer: ArrayBuffer }) => Promise<{ value: string }>;
-    };
-    return (await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() })).value;
-  }
+  if (name.endsWith('.pdf'))  return extractPdf(file);
+  if (name.endsWith('.docx')) return extractDocx(file);
+  // CSV / TXT — pass raw text, capped at 8 000 chars
   return (await file.text()).slice(0, 8000);
 }
 
-// ── Main Composer ─────────────────────────────────────────────────────────────
-type ActiveMode = 'web' | 'image' | null;
+// ── Camera modal ──────────────────────────────────────────────────────────────
+function CameraModal({
+  onCapture,
+  onClose,
+}: {
+  onCapture: (dataUrl: string) => void;
+  onClose: () => void;
+}) {
+  const videoRef  = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [tab, setTab]   = useState<'camera' | 'screen'>('camera');
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState('');
 
-export function Composer() {
-  const { mode, agentMode, model, messages, addMessage, appendToMessage, updateMessage, finalizeMessage, setStreaming, isStreaming } =
-    useSession();
-  const { isEnabled } = useTools();
-  const { addToast, removeToast } = useToast();
+  const startStream = useCallback(async (mode: 'camera' | 'screen') => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    setReady(false);
+    setError('');
+    try {
+      const stream =
+        mode === 'camera'
+          ? await navigator.mediaDevices.getUserMedia({ video: true })
+          : await navigator.mediaDevices.getDisplayMedia({ video: true });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current!.play();
+          setReady(true);
+        };
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Permission denied');
+    }
+  }, []);
 
-  const [text, setText]             = useState('');
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [plusOpen, setPlusOpen]     = useState(false);
-  const [activeMode, setActiveMode] = useState<ActiveMode>(null);
-  const [imageModel, setImageModel] = useState<ImageModel>('openai/dall-e-3');
-  const [isListening, setIsListening] = useState(false);
-
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const plusRef     = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recognitionRef = useRef<any>(null);
-
-  // Close + menu on outside click
   useEffect(() => {
-    if (!plusOpen) return;
+    startStream('camera');
+    return () => { streamRef.current?.getTracks().forEach((t) => t.stop()); };
+  }, [startStream]);
+
+  const switchTab = (t: 'camera' | 'screen') => {
+    setTab(t);
+    startStream(t);
+  };
+
+  const capture = () => {
+    const video  = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d')!.drawImage(video, 0, 0);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    onCapture(dataUrl);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        transition={{ duration: 0.15 }}
+        className="bg-bg-panel border border-border-hair rounded-2xl p-4 w-[480px] max-w-[92vw]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Tabs */}
+        <div className="flex bg-bg-elevated rounded-xl p-1 mb-3">
+          {(['camera', 'screen'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => switchTab(t)}
+              className="flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all duration-150 font-display"
+              style={{
+                background: tab === t ? 'linear-gradient(135deg,#FF1F2E,#8E0E16)' : 'transparent',
+                color: tab === t ? '#fff' : 'var(--text-lo)',
+              }}
+            >
+              {t === 'camera' ? '📷 Camera' : '🖥 Screen'}
+            </button>
+          ))}
+        </div>
+
+        {/* Preview */}
+        <div
+          className="relative bg-black rounded-xl overflow-hidden"
+          style={{ aspectRatio: '16/9' }}
+        >
+          <video ref={videoRef} muted playsInline className="w-full h-full object-contain" />
+          {!ready && !error && (
+            <div className="absolute inset-0 flex items-center justify-center text-text-lo text-xs">
+              Starting {tab}…
+            </div>
+          )}
+          {error && (
+            <div className="absolute inset-0 flex items-center justify-center text-red-core text-xs px-4 text-center">
+              {error}
+            </div>
+          )}
+        </div>
+        <canvas ref={canvasRef} className="hidden" />
+
+        {/* Buttons */}
+        <div className="flex gap-2 mt-3">
+          <button
+            onClick={capture}
+            disabled={!ready}
+            className="flex-1 py-2 rounded-xl text-sm font-semibold text-white transition-colors duration-150"
+            style={{
+              background: ready ? 'linear-gradient(135deg,#FF1F2E,#8E0E16)' : '#26262B',
+              cursor: ready ? 'pointer' : 'not-allowed',
+            }}
+          >
+            Capture
+          </button>
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-sm text-text-lo border border-border-hair hover:text-text-hi transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+// ── Main Composer ─────────────────────────────────────────────────────────────
+export function Composer() {
+  const {
+    mode, agentMode, model,
+    messages,
+    addMessage, appendToMessage, appendReasoning, finalizeMessage, setStreaming, isStreaming,
+    updateCanvas,
+    responseLength, setResponseLength,
+    regeneratePayload, setRegeneratePayload,
+  } = useSession();
+
+  const [showLengthMenu, setShowLengthMenu] = useState(false);
+  const lengthMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showLengthMenu) return;
     const handler = (e: MouseEvent) => {
-      if (plusRef.current && !plusRef.current.contains(e.target as Node)) setPlusOpen(false);
+      if (lengthMenuRef.current && !lengthMenuRef.current.contains(e.target as Node)) {
+        setShowLengthMenu(false);
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [plusOpen]);
+  }, [showLengthMenu]);
 
-  // Global Escape — dismiss active mode regardless of which element has focus
-  useEffect(() => {
-    if (!activeMode) return;
-    const handler = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setActiveMode(null); };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [activeMode]);
+  const { projects, activeProjectId } = useProjects();
+  const { settings: memSettings, facts } = useMemory();
+  const { addToast, removeToast } = useToast();
+  const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
 
-  // Focus composer on Ctrl+L
+  const [text, setText]             = useState('');
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [isListening, setIsListening] = useState(false);
+  const [googleOn, setGoogleOn]     = useState(false);
+  const [youtubeOn, setYoutubeOn]   = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const [visionWarn, setVisionWarn] = useState(false);
+
+  const textareaRef  = useRef<HTMLTextAreaElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef  = useRef<HTMLInputElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null);
+  const abortRef       = useRef<AbortController | null>(null);
+
+  const placeholder =
+    mode === 'chat'
+      ? 'Ask anything…'
+      : agentMode === 'swarm'
+      ? 'Describe a task — your Team will tackle it in parallel…'
+      : 'Describe a task — your agent will plan and execute it…';
+
+  // Focus composer on Ctrl+L global shortcut
   useEffect(() => {
-    const handler = () => { setText(''); textareaRef.current?.focus(); };
+    const handler = () => {
+      setText('');
+      textareaRef.current?.focus();
+    };
     window.addEventListener('focus-composer', handler);
     return () => window.removeEventListener('focus-composer', handler);
   }, []);
 
-  const placeholder =
-    activeMode === 'web'   ? 'Type your question and press send…' :
-    activeMode === 'image' ? 'Describe the image you want to generate and press send…' :
-    mode === 'chat'        ? 'Ask anything…' :
-    agentMode === 'swarm'  ? 'Describe a task — your Team will tackle it in parallel…' :
-                             'Describe a task — your agent will plan and execute it…';
+  // Show vision warning when image is attached and model doesn't support it
+  useEffect(() => {
+    const hasImage = attachments.some((a) => a.type === 'image');
+    setVisionWarn(hasImage && !modelSupportsVision(model));
+  }, [attachments, model]);
 
-  // ── Voice ──────────────────────────────────────────────────────────────────
-  const toggleVoice = useCallback(() => {
+  // ── Voice Input ─────────────────────────────────────────────────────────────
+  const toggleVoice = () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { addToast({ message: 'Speech recognition not available in this browser.', type: 'error' }); return; }
-    if (isListening) { recognitionRef.current?.stop(); setIsListening(false); return; }
+    if (!SR) {
+      alert('Speech recognition is not available in this environment.');
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
     const rec = new SR();
-    rec.continuous = false; rec.interimResults = true; rec.lang = 'en-US';
+    rec.continuous      = false;
+    rec.interimResults  = true;
+    rec.lang            = 'en-US';
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     rec.onresult = (e: any) => {
-      const t = Array.from(e.results as SpeechRecognitionResultList).map((r) => r[0].transcript).join('');
-      setText(t);
+      const transcript = Array.from(e.results as SpeechRecognitionResultList)
+        .map((r) => r[0].transcript)
+        .join('');
+      setText(transcript);
     };
-    rec.onend = () => setIsListening(false);
+    rec.onend   = () => setIsListening(false);
     rec.onerror = () => setIsListening(false);
     recognitionRef.current = rec;
     rec.start();
     setIsListening(true);
-    setPlusOpen(false);
-  }, [isListening, addToast]);
+  };
 
-  // ── Attach file (images + docs unified) ───────────────────────────────────
-  const handleFileSelected = async (file: File) => {
-    const isImage = file.type.startsWith('image/');
-    if (isImage) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        setAttachments((prev) => [...prev, {
-          type: 'image-upload', name: file.name, dataUrl: reader.result as string, mimeType: file.type,
-        }]);
-      };
-      reader.readAsDataURL(file);
-    } else {
-      try {
-        const extracted = await extractFileText(file);
-        setAttachments((prev) => [...prev, { type: 'file', name: file.name, text: extracted }]);
-      } catch {
-        addToast({ message: `Could not read "${file.name}". Try PDF, DOCX, CSV, or TXT.`, type: 'error' });
-      }
+  // ── Image Upload ────────────────────────────────────────────────────────────
+  const handleImageFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      setAttachments((prev) => [
+        ...prev,
+        { type: 'image', name: file.name, dataUrl: reader.result as string, mimeType: file.type },
+      ]);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // ── File Upload ─────────────────────────────────────────────────────────────
+  const handleDocFile = async (file: File) => {
+    try {
+      const extracted = await extractFileText(file);
+      setAttachments((prev) => [
+        ...prev,
+        { type: 'file', name: file.name, text: extracted },
+      ]);
+    } catch {
+      alert(`Could not read "${file.name}". Try a different file.`);
     }
   };
 
-  // ── Toggle a mode (web / image) ────────────────────────────────────────────
-  const toggleMode = (m: ActiveMode) => {
-    setActiveMode((prev) => prev === m ? null : m);
-    setPlusOpen(false);
-    setTimeout(() => textareaRef.current?.focus(), 50);
+  // ── Camera Capture ──────────────────────────────────────────────────────────
+  const handleCameraCapture = (dataUrl: string) => {
+    setAttachments((prev) => [
+      ...prev,
+      { type: 'image', name: 'capture.jpg', dataUrl, mimeType: 'image/jpeg' },
+    ]);
+    setShowCamera(false);
   };
 
-  // ── Send ───────────────────────────────────────────────────────────────────
-  const send = async () => {
-    const trimmed = text.trim();
-    if ((!trimmed && attachments.length === 0) || isStreaming) return;
+  // ── Save last AI reply to Canvas ────────────────────────────────────────────
+  const saveToCanvas = () => {
+    const lastAsst = [...messages].reverse().find((m) => m.role === 'assistant' && m.content);
+    if (!lastAsst) return;
+    updateCanvas({ content: lastAsst.content });
+  };
 
-    // ── Image generation mode ──────────────────────────────────────────────
-    if (activeMode === 'image' && trimmed) {
-      setText('');
-      if (textareaRef.current) textareaRef.current.style.height = 'auto';
-      setActiveMode(null);
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token ?? '';
-        const toastId = addToast({ message: 'Generating image…', type: 'info', duration: 0 });
-        // Show user prompt
-        addMessage({ role: 'user', content: trimmed });
-        const url = await generateImage(trimmed, imageModel, token, PROXY_BASE);
-        removeToast(toastId);
-        addMessage({ role: 'assistant', content: '', attachments: [{ type: 'image-gen', url, prompt: trimmed }] });
-      } catch (err) {
-        addToast({ message: err instanceof Error ? err.message : 'Image generation failed', type: 'error' });
-      }
-      return;
+  // ── Stop streaming ───────────────────────────────────────────────────────────
+  const stopStreaming = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  };
+
+  // ── Regenerate watcher ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (regeneratePayload) {
+      setRegeneratePayload(null);
+      sendWithText(regeneratePayload);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regeneratePayload]);
 
-    const snap = [...attachments];
-    setText('');
-    setAttachments([]);
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+  // ── Internal send for regenerate / editAndResend ─────────────────────────────
+  const sendWithText = async (forcedText: string) => {
+    if (isStreaming) return;
+    const trimmed = forcedText.trim();
+    if (!trimmed) return;
 
-    // ── Web search mode — Perplexity-style live timeline ──────────────────
-    if (activeMode === 'web' && trimmed) {
-      setActiveMode(null);
+    // Ensure the user message is visible in the store.
+    // After regenerate() the user msg is already there; after editAndResend() it was sliced away.
+    const latestMsgs = messages.filter((m) => !m.streaming);
+    const lastMsg = latestMsgs[latestMsgs.length - 1];
+    if (!lastMsg || lastMsg.role !== 'user' || lastMsg.content !== trimmed) {
       addMessage({ role: 'user', content: trimmed });
-
-      // Create assistant message with live web-search attachment
-      const asstMsgId = addMessage({
-        role: 'assistant',
-        content: '',
-        streaming: true,
-        attachments: [{ type: 'web-search', webStatus: 'searching', query: trimmed, sources: [] }],
-      });
-      setStreaming(true);
-
-      let sources: WebSource[] = [];
-      let contextPrefix = '';
-      try {
-        // Step 1 — searching (already shown)
-        await new Promise((r) => setTimeout(r, 600));
-
-        // Step 2 — reading
-        updateMessage(asstMsgId, {
-          attachments: [{ type: 'web-search', webStatus: 'reading', query: trimmed, sources: [] }],
-        });
-        const results = await searchWeb(trimmed);
-        sources = results;
-        contextPrefix = formatResultsAsContext(trimmed, results);
-
-        // Step 3 — answering
-        updateMessage(asstMsgId, {
-          attachments: [{ type: 'web-search', webStatus: 'answering', query: trimmed, sources }],
-        });
-        await new Promise((r) => setTimeout(r, 300));
-
-        const historyMsgs = messages
-          .filter((m) => !m.streaming && m.content)
-          .map((m) => ({ role: m.role, content: m.content }));
-        const gen = streamChat({ model, messages: [...historyMsgs, { role: 'user', content: contextPrefix }] });
-        for await (const chunk of gen) appendToMessage(asstMsgId, chunk);
-      } catch (err) {
-        if (err instanceof Error) appendToMessage(asstMsgId, `\n\n*Error: ${err.message}*`);
-      } finally {
-        updateMessage(asstMsgId, {
-          streaming: false,
-          attachments: [{ type: 'web-search', webStatus: 'done', query: trimmed, sources }],
-        });
-        setStreaming(false);
-        finalizeMessage(asstMsgId);
-      }
-      return;
     }
 
-    setActiveMode(null);
-
-    // File context prefix
-    let contextPrefix = '';
-    for (const fa of snap.filter((a) => a.type === 'file')) {
-      contextPrefix += `[File: ${fa.name}]\n${(fa.text ?? '').slice(0, 6000)}\n---\n\n`;
+    const systemParts: string[] = [];
+    const lengthHint: Record<string, string> = {
+      short: 'Keep your response brief and concise (1–3 short paragraphs or less).',
+      medium: 'Give a moderately detailed response (3–6 paragraphs).',
+      long: 'Give a thorough, comprehensive response with full detail.',
+    };
+    if (lengthHint[responseLength]) systemParts.push(lengthHint[responseLength]);
+    if (memSettings.globalSystemPrompt) systemParts.push(memSettings.globalSystemPrompt);
+    if (memSettings.memoryEnabled && facts.length) {
+      systemParts.push(`[What I remember about you]\n${facts.map((f) => `- ${f.text}`).join('\n')}`);
+    }
+    if (activeProject?.systemPrompt) systemParts.push(activeProject.systemPrompt);
+    if (activeProject?.memory) systemParts.push(`[Project memory]\n${activeProject.memory}`);
+    if (activeProject?.files && activeProject.files.length > 0) {
+      systemParts.push(activeProject.files.map((f) => `[File: ${f.name}]\n${f.text}`).join('\n\n'));
     }
 
-    const displayAttachments = snap.filter((a) => a.type !== 'file');
-    addMessage({ role: 'user', content: trimmed, attachments: displayAttachments.length ? displayAttachments : undefined });
+    // Build history, stripping any trailing user message to avoid duplication
+    // (regenerate() leaves the user msg in the store; we append it explicitly below)
+    const allHistory = latestMsgs
+      .filter((m) => m.content)
+      .map((m) => ({ role: m.role, content: m.content }));
+    const historyMsgs = allHistory[allHistory.length - 1]?.role === 'user'
+      ? allHistory.slice(0, -1)
+      : allHistory;
 
-    const fullText = contextPrefix + (trimmed || '(see attached)');
+    const systemMsg = systemParts.length > 0
+      ? [{ role: 'system' as const, content: systemParts.join('\n\n') }]
+      : [];
+
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     const asstMsgId = addMessage({ role: 'assistant', content: '', streaming: true });
     setStreaming(true);
-    const toastId = addToast({ message: 'AI is thinking…', type: 'info', duration: 0 });
+    const thinkingToastIdSWT = addToast({ message: 'AI is thinking…', type: 'info', duration: 0 });
+    let swtErrored = false;
 
     try {
-      const historyMsgs = messages
-        .filter((m) => !m.streaming && m.content)
-        .map((m) => ({ role: m.role, content: m.content }));
-      const gen = streamChat({ model, messages: [...historyMsgs, { role: 'user', content: fullText }] });
-      for await (const chunk of gen) appendToMessage(asstMsgId, chunk);
+      const gen = streamChat({
+        model,
+        messages: [...systemMsg, ...historyMsgs, { role: 'user', content: trimmed }],
+        signal: ctrl.signal,
+      });
+      for await (const chunk of gen) {
+        if (ctrl.signal.aborted) break;
+        if (chunk.kind === 'reasoning') {
+          appendReasoning(asstMsgId, chunk.text);
+        } else {
+          appendToMessage(asstMsgId, chunk.text);
+        }
+      }
     } catch (err) {
-      if (err instanceof Error) {
+      if (err instanceof Error && err.name !== 'AbortError') {
+        swtErrored = true;
         appendToMessage(asstMsgId, `\n\n*Error: ${err.message}*`);
+        removeToast(thinkingToastIdSWT);
         addToast({ message: 'Something went wrong. Please try again.', type: 'error', duration: 5000 });
       }
     } finally {
       finalizeMessage(asstMsgId);
       setStreaming(false);
-      removeToast(toastId);
+      abortRef.current = null;
+      removeToast(thinkingToastIdSWT);
+      // Only show success toast if not aborted and no error
+      if (!swtErrored && !ctrl.signal.aborted) {
+        addToast({ message: 'Response ready', type: 'success', duration: 2500 });
+      }
+    }
+  };
+
+  const send = async () => {
+    const trimmed = text.trim();
+    if ((!trimmed && attachments.length === 0) || isStreaming) return;
+
+    // Snapshot attachments before clearing state
+    const snap = [...attachments];
+    setText('');
+    setAttachments([]);
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+
+    // Build context prefix from search results
+    let contextPrefix = '';
+    if ((googleOn || youtubeOn) && trimmed) {
+      setIsSearching(true);
+      const [gResults, ytResults] = await Promise.all([
+        googleOn  ? googleSearch(trimmed)  : Promise.resolve([]),
+        youtubeOn ? youtubeSearch(trimmed) : Promise.resolve([]),
+      ]);
+      setIsSearching(false);
+      if (gResults.length)  contextPrefix += formatSearchContext(gResults, trimmed);
+      if (ytResults.length) contextPrefix += formatYouTubeContext(ytResults, trimmed);
+    }
+
+    // Build file context prefix from snapshotted attachments
+    for (const fa of snap.filter((a) => a.type === 'file')) {
+      contextPrefix += `[File: ${fa.name}]\n${(fa.text ?? '').slice(0, 6000)}\n---\n\n`;
+    }
+
+    // Attachment badges shown in the chat bubble
+    const displayAttachments: Attachment[] = [...snap];
+    if (googleOn  && trimmed) displayAttachments.push({ type: 'search',  name: 'Google Search' });
+    if (youtubeOn && trimmed) displayAttachments.push({ type: 'youtube', name: 'YouTube Search' });
+
+    // Add user message to store for display
+    addMessage({
+      role: 'user',
+      content: trimmed,
+      attachments: displayAttachments.length ? displayAttachments : undefined,
+    });
+
+    // Build API content — multimodal when images present
+    const imageSnap = snap.filter((a) => a.type === 'image' && a.dataUrl);
+    const fullText  = contextPrefix + (trimmed || '(see attached image)');
+
+    let apiContent: string | ContentBlock[];
+    if (imageSnap.length > 0) {
+      const blocks: ContentBlock[] = imageSnap.map((img) => ({
+        type: 'image_url' as const,
+        image_url: { url: img.dataUrl! },
+      }));
+      blocks.push({ type: 'text', text: fullText });
+      apiContent = blocks;
+    } else {
+      apiContent = fullText;
+    }
+
+    // Create abort controller for this request
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    const asstMsgId = addMessage({ role: 'assistant', content: '', streaming: true });
+    setStreaming(true);
+    const thinkingToastId = addToast({ message: 'AI is thinking…', type: 'info', duration: 0 });
+    let sendErrored = false;
+
+    // Build system context (global instructions + memory + project)
+    const systemParts: string[] = [];
+    const lengthHint: Record<string, string> = {
+      short: 'Keep your response brief and concise (1–3 short paragraphs or less).',
+      medium: 'Give a moderately detailed response (3–6 paragraphs).',
+      long: 'Give a thorough, comprehensive response with full detail.',
+    };
+    if (lengthHint[responseLength]) systemParts.push(lengthHint[responseLength]);
+    if (memSettings.globalSystemPrompt) systemParts.push(memSettings.globalSystemPrompt);
+    if (memSettings.memoryEnabled && facts.length) {
+      systemParts.push(`[What I remember about you]\n${facts.map((f) => `- ${f.text}`).join('\n')}`);
+    }
+    if (activeProject?.systemPrompt) systemParts.push(activeProject.systemPrompt);
+    if (activeProject?.memory) systemParts.push(`[Project memory]\n${activeProject.memory}`);
+    if (activeProject?.files && activeProject.files.length > 0) {
+      systemParts.push(activeProject.files.map((f) => `[File: ${f.name}]\n${f.text}`).join('\n\n'));
+    }
+
+    // Build full conversation history for context (finalized messages only, no images in history)
+    const historyMsgs = messages
+      .filter((m) => !m.streaming && m.content)
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    const systemMsg = systemParts.length > 0
+      ? [{ role: 'system' as const, content: systemParts.join('\n\n') }]
+      : [];
+
+    try {
+      const gen = streamChat({
+        model,
+        messages: [...systemMsg, ...historyMsgs, { role: 'user', content: apiContent }],
+        signal: ctrl.signal,
+      });
+      for await (const chunk of gen) {
+        if (ctrl.signal.aborted) break;
+        if (chunk.kind === 'reasoning') {
+          appendReasoning(asstMsgId, chunk.text);
+        } else {
+          appendToMessage(asstMsgId, chunk.text);
+        }
+      }
+    } catch (err) {
+      // Ignore AbortError — user pressed stop intentionally
+      if (err instanceof Error && err.name !== 'AbortError') {
+        sendErrored = true;
+        appendToMessage(asstMsgId, `\n\n*Error: ${err.message}*`);
+        removeToast(thinkingToastId);
+        addToast({ message: 'Something went wrong. Please try again.', type: 'error', duration: 5000 });
+      }
+    } finally {
+      finalizeMessage(asstMsgId);
+      setStreaming(false);
+      abortRef.current = null;
+      removeToast(thinkingToastId);
+      // Only show success toast if not aborted and no error
+      if (!sendErrored && !ctrl.signal.aborted) {
+        addToast({ message: 'Response ready', type: 'success', duration: 2500 });
+      }
     }
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-    if (e.key === 'Escape') setActiveMode(null);
   };
 
   const onInput = () => {
@@ -270,88 +561,73 @@ export function Composer() {
     el.style.height = Math.min(el.scrollHeight, 160) + 'px';
   };
 
-  const removeAttachment = (idx: number) => setAttachments((prev) => prev.filter((_, i) => i !== idx));
-  const canSend = (text.trim().length > 0 || attachments.length > 0) && !isStreaming;
+  const removeAttachment = (idx: number) =>
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
 
-  const webEnabled   = isEnabled('web_search');
-  const imageEnabled = isEnabled('image_gen');
+  const canSend = (text.trim().length > 0 || attachments.length > 0) && !isStreaming;
 
   return (
     <>
-      {/* Hidden unified file input — accepts images + docs */}
+      <AnimatePresence>
+        {showCamera && (
+          <CameraModal onCapture={handleCameraCapture} onClose={() => setShowCamera(false)} />
+        )}
+      </AnimatePresence>
+
+      {/* Hidden file inputs */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageFile(f); e.target.value = ''; }}
+      />
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,.pdf,.docx,.csv,.txt"
+        accept=".pdf,.docx,.csv,.txt"
         className="hidden"
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileSelected(f); e.target.value = ''; }}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDocFile(f); e.target.value = ''; }}
       />
 
       <div className="px-4 pb-4">
-
-        {/* Active mode pill */}
+        {/* Vision warning */}
         <AnimatePresence>
-          {activeMode && (
-            <motion.div
+          {visionWarn && (
+            <motion.p
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden mb-2"
+              className="text-xs text-amber-400 mb-1.5 px-1"
             >
-              <div className="flex items-center gap-2 px-3 py-2 bg-red-core/10 border border-red-core/30 rounded-xl">
-                <span className="text-sm">{activeMode === 'web' ? '🔍' : '🎨'}</span>
-                <span className="text-xs font-semibold text-red-core">
-                  {activeMode === 'web' ? 'Web Search mode' : 'Image Generation mode'}
-                </span>
-
-                {/* Model picker for image gen */}
-                {activeMode === 'image' && (
-                  <div className="ml-auto flex items-center gap-1">
-                    {IMAGE_MODELS.map((m) => (
-                      <button
-                        key={m.id}
-                        onClick={() => setImageModel(m.id)}
-                        className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${
-                          imageModel === m.id
-                            ? 'border-red-core text-red-core bg-red-core/10'
-                            : 'border-border-hair text-text-lo hover:text-text-hi'
-                        }`}
-                      >
-                        {m.id === 'openai/dall-e-3' ? 'DALL·E 3' : 'Gemini'}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); setActiveMode(null); }}
-                  className="text-red-core/60 hover:text-red-core text-xs ml-2 px-1"
-                  aria-label="Cancel mode"
-                >
-                  ✕
-                </button>
-              </div>
-            </motion.div>
+              ⚠ Current model may not support images. Switch to Owl Alpha or GPT-4o for vision.
+            </motion.p>
           )}
         </AnimatePresence>
 
         <div className="bg-bg-elevated border border-border-hair rounded-xl focus-within:border-red-core/40 focus-within:shadow-red-glow transition-all duration-200">
 
-          {/* Attachment chips */}
+          {/* Attachment previews */}
           <AnimatePresence>
             {attachments.length > 0 && (
               <motion.div
-                initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
                 className="flex flex-wrap gap-2 px-3 pt-3 overflow-hidden"
               >
                 {attachments.map((att, idx) => (
-                  <div key={idx} className="relative group flex items-center gap-1.5 bg-bg-panel border border-border-hair rounded-lg overflow-hidden">
-                    {att.type === 'image-upload' && att.dataUrl ? (
+                  <div
+                    key={idx}
+                    className="relative group flex items-center gap-1.5 bg-bg-panel border border-border-hair rounded-lg overflow-hidden"
+                  >
+                    {att.type === 'image' && att.dataUrl ? (
                       <img src={att.dataUrl} alt={att.name} className="h-14 w-14 object-cover" />
                     ) : (
                       <div className="px-2 py-1 flex items-center gap-1.5">
-                        <span className="text-base">{att.type === 'file' ? '📄' : '🖼'}</span>
+                        <span className="text-base">
+                          {att.type === 'file' ? '📄' : att.type === 'search' ? '🔍' : '▶'}
+                        </span>
                         <span className="text-xs text-text-lo max-w-[120px] truncate">{att.name}</span>
                       </div>
                     )}
@@ -367,68 +643,8 @@ export function Composer() {
             )}
           </AnimatePresence>
 
-          {/* Input row: [+] [textarea] [send] */}
-          <div className="flex items-end gap-2 px-3 py-2.5">
-
-            {/* + button with dropdown */}
-            <div className="relative flex-shrink-0 self-end pb-0.5" ref={plusRef}>
-              <button
-                onClick={() => setPlusOpen((v) => !v)}
-                title="Attach or choose a tool"
-                aria-label="Open tools menu"
-                className="w-8 h-8 rounded-lg flex items-center justify-center border transition-all duration-150"
-                style={{
-                  borderColor: plusOpen ? 'var(--red-core)' : 'var(--border-hair)',
-                  background: plusOpen ? 'var(--red-core)' : 'transparent',
-                  color: plusOpen ? '#fff' : 'var(--text-lo)',
-                }}
-              >
-                <PlusIcon open={plusOpen} />
-              </button>
-
-              <AnimatePresence>
-                {plusOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 6, scale: 0.97 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 6, scale: 0.97 }}
-                    transition={{ duration: 0.14 }}
-                    className="absolute bottom-full left-0 mb-2 w-52 bg-bg-panel border border-border-hair rounded-xl shadow-2xl overflow-hidden z-50"
-                  >
-                    {webEnabled && (
-                      <MenuItem
-                        icon={<WebIcon />}
-                        label="Web Search"
-                        active={activeMode === 'web'}
-                        onClick={() => toggleMode('web')}
-                      />
-                    )}
-                    {imageEnabled && (
-                      <MenuItem
-                        icon={<PaletteIcon />}
-                        label="Image Generation"
-                        active={activeMode === 'image'}
-                        onClick={() => toggleMode('image')}
-                      />
-                    )}
-                    <MenuItem
-                      icon={<PaperclipIcon />}
-                      label="Attach File or Image"
-                      onClick={() => { fileInputRef.current?.click(); setPlusOpen(false); }}
-                    />
-                    <MenuItem
-                      icon={<MicIcon listening={isListening} />}
-                      label={isListening ? 'Stop Voice Input' : 'Voice Input'}
-                      active={isListening}
-                      onClick={toggleVoice}
-                      badge={isListening ? <span className="w-2 h-2 rounded-full bg-red-core animate-pulse" /> : undefined}
-                    />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            {/* Textarea */}
+          {/* Textarea */}
+          <div className="px-3 pt-2.5">
             <textarea
               ref={textareaRef}
               value={text}
@@ -438,28 +654,113 @@ export function Composer() {
               placeholder={placeholder}
               rows={1}
               disabled={isStreaming}
-              className="flex-1 resize-none bg-transparent text-sm text-text-hi placeholder-text-lo outline-none leading-relaxed"
+              className="w-full resize-none bg-transparent text-sm text-text-hi placeholder-text-lo outline-none leading-relaxed"
               style={{ fontFamily: 'var(--display)', maxHeight: '160px' }}
             />
+          </div>
 
-            {/* Send */}
+          {/* Toolbar row */}
+          <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
+            {/* Left: tool buttons */}
+            <div className="flex items-center gap-1">
+              <ToolBtn
+                title={isListening ? 'Stop listening' : 'Voice input (mic)'}
+                active={isListening}
+                onClick={toggleVoice}
+              >
+                <MicIcon listening={isListening} />
+              </ToolBtn>
+
+              <ToolBtn title="Upload image" onClick={() => imageInputRef.current?.click()}>
+                <ImageIcon />
+              </ToolBtn>
+
+              <ToolBtn title="Upload file (PDF, DOCX, CSV)" onClick={() => fileInputRef.current?.click()}>
+                <FileIcon />
+              </ToolBtn>
+
+              <ToolBtn title="Camera / screenshot" onClick={() => setShowCamera(true)}>
+                <CameraIcon />
+              </ToolBtn>
+
+              <ToolBtn
+                title="Save last reply to Canvas"
+                onClick={saveToCanvas}
+                dim={!messages.some((m) => m.role === 'assistant')}
+              >
+                <CanvasIcon />
+              </ToolBtn>
+
+              <div className="w-px h-4 bg-border-hair mx-1" />
+
+              <ToolBtn
+                title={hasGoogleSearch ? 'Google Search (click to toggle)' : 'Google Search — add GOOGLE_SEARCH_KEY secret to enable'}
+                active={googleOn}
+                onClick={() => { if (hasGoogleSearch) setGoogleOn((v) => !v); }}
+                dim={!hasGoogleSearch}
+              >
+                <GoogleIcon />
+              </ToolBtn>
+
+              <ToolBtn
+                title={hasYouTubeSearch ? 'YouTube Search (click to toggle)' : 'YouTube Search — add YOUTUBE_KEY secret to enable'}
+                active={youtubeOn}
+                onClick={() => { if (hasYouTubeSearch) setYoutubeOn((v) => !v); }}
+                dim={!hasYouTubeSearch}
+              >
+                <YouTubeIcon />
+              </ToolBtn>
+
+              {isSearching && (
+                <span className="text-xs text-text-lo animate-pulse ml-1">Searching…</span>
+              )}
+            </div>
+
+            {/* Right: length pill + send / stop button */}
+            <div className="flex items-center gap-1.5">
+              {/* Response length pill */}
+              <div className="relative" ref={lengthMenuRef}>
+                <button
+                  onClick={() => setShowLengthMenu((v) => !v)}
+                  className="flex items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-medium text-text-lo hover:text-text-hi border border-border-hair hover:border-red-core/30 transition-colors"
+                >
+                  {responseLength === 'auto' ? 'Auto' : responseLength.charAt(0).toUpperCase() + responseLength.slice(1)}
+                  <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M4 5.5L1 2.5h6L4 5.5z"/></svg>
+                </button>
+                {showLengthMenu && (
+                  <div className="absolute bottom-full mb-1 right-0 bg-bg-panel border border-border-hair rounded-xl overflow-hidden shadow-xl z-20 min-w-[90px]">
+                    {(['auto', 'short', 'medium', 'long'] as ResponseLength[]).map((opt) => (
+                      <button
+                        key={opt}
+                        onClick={() => { setResponseLength(opt); setShowLengthMenu(false); }}
+                        className={`w-full text-left px-3 py-1.5 text-[11px] transition-colors ${responseLength === opt ? 'text-red-core bg-red-core/10' : 'text-text-lo hover:text-text-hi hover:bg-bg-elevated'}`}
+                      >
+                        {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
             <motion.button
-              onClick={send}
+              onClick={isStreaming ? stopStreaming : send}
               disabled={!isStreaming && !canSend}
               whileTap={{ scale: 0.92 }}
-              className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-150 self-end"
+              className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-150 flex-shrink-0"
               style={{
-                background: isStreaming || canSend ? '#FF1F2E' : '#26262B',
-                cursor: isStreaming || canSend ? 'pointer' : 'not-allowed',
+                background: isStreaming ? '#FF1F2E' : canSend ? '#FF1F2E' : '#26262B',
+                cursor: (isStreaming || canSend) ? 'pointer' : 'not-allowed',
               }}
             >
               {isStreaming ? <StopIcon /> : <SendIcon />}
             </motion.button>
+            </div>
           </div>
         </div>
 
         <p className="text-center text-xs text-text-lo mt-2 opacity-50">
           Enter to send · Shift+Enter for new line
+          {(googleOn || youtubeOn) && ' · Search ON'}
           {isListening && ' · 🎤 Listening…'}
         </p>
       </div>
@@ -467,42 +768,37 @@ export function Composer() {
   );
 }
 
-// ── MenuItem ──────────────────────────────────────────────────────────────────
-function MenuItem({
-  icon, label, onClick, active = false, badge,
+// ── Small toolbar button ──────────────────────────────────────────────────────
+function ToolBtn({
+  children, onClick, title, active = false, dim = false,
 }: {
-  icon: React.ReactNode;
-  label: string;
+  children: ReactNode;
   onClick: () => void;
+  title: string;
   active?: boolean;
-  badge?: React.ReactNode;
+  dim?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 px-3 py-2.5 text-sm transition-colors text-left"
+      title={title}
+      className="w-7 h-7 rounded-md flex items-center justify-center transition-all duration-150"
       style={{
-        background: active ? 'var(--red-core)11' : 'transparent',
-        color: active ? 'var(--red-core)' : 'var(--text-lo)',
+        background: active ? '#FF1F2E22' : 'transparent',
+        opacity: dim ? 0.35 : 1,
+        color: active ? '#FF1F2E' : 'var(--text-lo)',
       }}
-      onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLElement).style.background = 'var(--bg-elevated)'; (e.currentTarget as HTMLElement).style.color = 'var(--text-hi)'; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = active ? 'var(--red-core)11' : 'transparent'; (e.currentTarget as HTMLElement).style.color = active ? 'var(--red-core)' : 'var(--text-lo)'; }}
+      onMouseEnter={(e) => { if (!dim) (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-hi)'; }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.color = active ? '#FF1F2E' : 'var(--text-lo)';
+      }}
     >
-      <span className="flex-shrink-0">{icon}</span>
-      <span className="flex-1">{label}</span>
-      {badge}
+      {children}
     </button>
   );
 }
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
-function PlusIcon({ open }: { open: boolean }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-      <path d={open ? 'M2 2L12 12M12 2L2 12' : 'M7 1V13M1 7H13'} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
 function MicIcon({ listening }: { listening: boolean }) {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
@@ -514,28 +810,50 @@ function MicIcon({ listening }: { listening: boolean }) {
     </svg>
   );
 }
-function WebIcon() {
+function ImageIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <polyline points="21 15 16 10 5 21" />
     </svg>
   );
 }
-function PaletteIcon() {
+function FileIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <circle cx="13.5" cy="6.5" r="1" fill="currentColor" />
-      <circle cx="17.5" cy="10.5" r="1" fill="currentColor" />
-      <circle cx="8.5" cy="7.5" r="1" fill="currentColor" />
-      <circle cx="6.5" cy="12.5" r="1" fill="currentColor" />
-      <path d="M12 2C6.5 2 2 6.5 2 12a10 10 0 0010 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 011.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" />
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="8" y1="13" x2="16" y2="13" />
+      <line x1="8" y1="17" x2="16" y2="17" />
     </svg>
   );
 }
-function PaperclipIcon() {
+function CameraIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
+  );
+}
+function GoogleIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+    </svg>
+  );
+}
+function YouTubeIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M23.5 6.2a3 3 0 00-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 00.5 6.2 31.1 31.1 0 000 12a31.1 31.1 0 00.5 5.8 3 3 0 002.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 002.1-2.1A31.1 31.1 0 0024 12a31.1 31.1 0 00-.5-5.8zM9.75 15.5v-7l6.25 3.5-6.25 3.5z"/>
     </svg>
   );
 }
@@ -550,6 +868,15 @@ function StopIcon() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
       <rect x="1" y="1" width="8" height="8" rx="1" fill="#F4F4F6" />
+    </svg>
+  );
+}
+function CanvasIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
     </svg>
   );
 }

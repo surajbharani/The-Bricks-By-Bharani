@@ -1,12 +1,35 @@
 import { supabase } from './supabase';
+import { useAuth } from '../store/useAuth';
 
 const PROXY_URL = import.meta.env.VITE_PROXY_URL || 'https://api.nanobricks.app';
 const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_KEY as string | undefined;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
+export type StreamChunk =
+  | { kind: 'text'; text: string }
+  | { kind: 'reasoning'; text: string };
+
 export interface ChatRequest {
   model: string;
-  messages: { role: string; content: string }[];
+  messages: { role: string; content: string | ContentBlock[] }[];
+  signal?: AbortSignal;
+}
+
+// Models that support vision/image input
+export const VISION_MODELS = new Set([
+  'openrouter/owl-alpha',
+  'openai/gpt-4o',
+  'openai/gpt-4o-mini',
+  'anthropic/claude-3-5-sonnet',
+  'google/gemini-pro-vision',
+]);
+
+export function modelSupportsVision(model: string): boolean {
+  return VISION_MODELS.has(model) || model.startsWith('openrouter/');
 }
 
 async function getJwt(): Promise<string | null> {
@@ -14,20 +37,37 @@ async function getJwt(): Promise<string | null> {
   return data.session?.access_token ?? null;
 }
 
-// Strip leading "openrouter/" prefix that OpenRouter itself doesn't expect
 function normalizeModel(model: string): string {
   return model.startsWith('openrouter/') ? model.slice('openrouter/'.length) : model;
 }
 
-export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
+function extractText(content: string | ContentBlock[]): string {
+  if (typeof content === 'string') return content;
+  const block = content.find((b) => b.type === 'text');
+  return block?.type === 'text' ? block.text : '';
+}
+
+export async function* streamChat(req: ChatRequest): AsyncGenerator<StreamChunk> {
+  const { signal } = req;
+
   if (import.meta.env.DEV && !import.meta.env.VITE_USE_REAL_PROXY) {
-    yield* stubStream(req.messages.at(-1)?.content ?? '');
+    yield* stubStream(extractText(req.messages.at(-1)?.content ?? ''));
     return;
   }
 
-  // Direct OpenRouter path — used when VITE_OPENROUTER_KEY is embedded at build time
+  const isDev = useAuth.getState().isDev;
+
+  if (isDev) {
+    if (OPENROUTER_KEY) {
+      yield* streamOpenRouter(req, signal);
+    } else {
+      yield* devStub();
+    }
+    return;
+  }
+
   if (OPENROUTER_KEY && req.model.startsWith('openrouter/')) {
-    yield* streamOpenRouter(req);
+    yield* streamOpenRouter(req, signal);
     return;
   }
 
@@ -36,15 +76,12 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
 
   const res = await fetch(`${PROXY_URL}/v1/chat`, {
     method: 'POST',
+    signal,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({
-      model: req.model,
-      messages: req.messages,
-      stream: true,
-    }),
+    body: JSON.stringify({ model: req.model, messages: req.messages, stream: true }),
   });
 
   if (!res.ok) {
@@ -52,36 +89,13 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
     throw new Error(err.error ?? `Proxy error ${res.status}`);
   }
 
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-
-    const lines = buf.split('\n');
-    buf = lines.pop() ?? '';
-
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6).trim();
-      if (data === '[DONE]') return;
-      try {
-        const chunk = JSON.parse(data);
-        const text = chunk.choices?.[0]?.delta?.content;
-        if (text) yield text;
-      } catch {
-        // skip malformed chunks
-      }
-    }
-  }
+  yield* readSSEStream(res, signal);
 }
 
-async function* streamOpenRouter(req: ChatRequest): AsyncGenerator<string> {
+async function* streamOpenRouter(req: ChatRequest, signal?: AbortSignal): AsyncGenerator<StreamChunk> {
   const res = await fetch(OPENROUTER_URL, {
     method: 'POST',
+    signal,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${OPENROUTER_KEY}`,
@@ -100,41 +114,121 @@ async function* streamOpenRouter(req: ChatRequest): AsyncGenerator<string> {
     throw new Error(err.error?.message ?? `OpenRouter error ${res.status}`);
   }
 
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
+  yield* readSSEStream(res, signal);
+}
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    buf = lines.pop() ?? '';
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6).trim();
-      if (data === '[DONE]') return;
-      try {
-        const chunk = JSON.parse(data);
-        const text = chunk.choices?.[0]?.delta?.content;
-        if (text) yield text;
-      } catch { /* skip malformed */ }
+// Stateful parser that splits raw text into text vs reasoning chunks
+class ThinkParser {
+  private buf = '';
+  private inThink = false;
+
+  feed(raw: string): StreamChunk[] {
+    const out: StreamChunk[] = [];
+    this.buf += raw;
+
+    while (this.buf.length > 0) {
+      if (this.inThink) {
+        const end = this.buf.indexOf('</think>');
+        if (end === -1) {
+          const safeLen = Math.max(0, this.buf.length - 8);
+          if (safeLen > 0) {
+            out.push({ kind: 'reasoning', text: this.buf.slice(0, safeLen) });
+            this.buf = this.buf.slice(safeLen);
+          }
+          break;
+        }
+        out.push({ kind: 'reasoning', text: this.buf.slice(0, end) });
+        this.buf = this.buf.slice(end + '</think>'.length);
+        this.inThink = false;
+      } else {
+        const start = this.buf.indexOf('<think>');
+        if (start === -1) {
+          const safeLen = Math.max(0, this.buf.length - 6);
+          if (safeLen > 0) {
+            out.push({ kind: 'text', text: this.buf.slice(0, safeLen) });
+            this.buf = this.buf.slice(safeLen);
+          }
+          break;
+        }
+        if (start > 0) {
+          out.push({ kind: 'text', text: this.buf.slice(0, start) });
+        }
+        this.buf = this.buf.slice(start + '<think>'.length);
+        this.inThink = true;
+      }
     }
+
+    return out;
+  }
+
+  flush(): StreamChunk[] {
+    if (!this.buf) return [];
+    const kind: StreamChunk['kind'] = this.inThink ? 'reasoning' : 'text';
+    const chunks: StreamChunk[] = [{ kind, text: this.buf }];
+    this.buf = '';
+    this.inThink = false;
+    return chunks;
   }
 }
 
-async function* stubStream(prompt: string): AsyncGenerator<string> {
+async function* readSSEStream(res: Response, signal?: AbortSignal): AsyncGenerator<StreamChunk> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  const parser = new ThinkParser();
+  let buf = '';
+
+  try {
+    while (true) {
+      if (signal?.aborted) break;
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') {
+          for (const chunk of parser.flush()) yield chunk;
+          return;
+        }
+        try {
+          const chunk = JSON.parse(data);
+          // DeepSeek Reasoner streams reasoning via reasoning_content field
+          const reasoningDelta = chunk.choices?.[0]?.delta?.reasoning_content as string | undefined;
+          const textDelta = chunk.choices?.[0]?.delta?.content as string | undefined;
+          if (reasoningDelta) yield { kind: 'reasoning', text: reasoningDelta };
+          if (textDelta) {
+            for (const c of parser.feed(textDelta)) yield c;
+          }
+        } catch { /* skip malformed chunks */ }
+      }
+    }
+    for (const chunk of parser.flush()) yield chunk;
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+}
+
+async function* stubStream(prompt: string): AsyncGenerator<StreamChunk> {
   const reply =
     `You asked: "${prompt}"\n\n` +
     `I'm **Nano Bricks**, your AI agent. ` +
     `Switch to **Agent mode** to watch me plan, execute, and verify tasks step by step — ` +
     `or use **Team mode** to run parallel sub-agents for faster results.\n\n` +
     `*(This is a preview stub — connect the proxy to get real AI responses.)*`;
+  for (const char of reply) { yield { kind: 'text', text: char }; await delay(18); }
+}
 
-  for (const char of reply) {
-    yield char;
-    await delay(18);
-  }
+async function* devStub(): AsyncGenerator<StreamChunk> {
+  const reply =
+    `**Developer mode** — OpenRouter key not embedded in this build.\n\n` +
+    `To test real AI responses:\n` +
+    `1. Add \`OPENROUTER_KEY\` secret in GitHub → Settings → Secrets → Actions\n` +
+    `2. Re-trigger the Windows build from GitHub Actions\n` +
+    `3. Install the new build\n\n` +
+    `Everything else in the app works normally.`;
+  for (const char of reply) { yield { kind: 'text', text: char }; await delay(12); }
 }
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
