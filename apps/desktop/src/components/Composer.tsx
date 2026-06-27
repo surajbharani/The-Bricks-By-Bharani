@@ -4,6 +4,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSession, type Attachment } from '../store/useSession';
 import { streamChat, modelSupportsVision, type ContentBlock } from '../lib/proxyClient';
+
 import {
   googleSearch, youtubeSearch,
   formatSearchContext, formatYouTubeContext,
@@ -182,7 +183,9 @@ function CameraModal({
 export function Composer() {
   const {
     mode, agentMode, model,
-    addMessage, appendToMessage, finalizeMessage, setStreaming, isStreaming,
+    messages,
+    addMessage, appendToMessage, appendReasoning, finalizeMessage, setStreaming, isStreaming,
+    updateCanvas,
   } = useSession();
 
   const [text, setText]             = useState('');
@@ -281,6 +284,13 @@ export function Composer() {
     setShowCamera(false);
   };
 
+  // ── Save last AI reply to Canvas ────────────────────────────────────────────
+  const saveToCanvas = () => {
+    const lastAsst = [...messages].reverse().find((m) => m.role === 'assistant' && m.content);
+    if (!lastAsst) return;
+    updateCanvas({ content: lastAsst.content });
+  };
+
   // ── Stop streaming ───────────────────────────────────────────────────────────
   const stopStreaming = () => {
     abortRef.current?.abort();
@@ -355,7 +365,11 @@ export function Composer() {
       const gen = streamChat({ model, messages: [{ role: 'user', content: apiContent }], signal: ctrl.signal });
       for await (const chunk of gen) {
         if (ctrl.signal.aborted) break;
-        appendToMessage(asstMsgId, chunk);
+        if (chunk.kind === 'reasoning') {
+          appendReasoning(asstMsgId, chunk.text);
+        } else {
+          appendToMessage(asstMsgId, chunk.text);
+        }
       }
     } catch (err) {
       // Ignore AbortError — user pressed stop intentionally
@@ -503,6 +517,14 @@ export function Composer() {
 
               <ToolBtn title="Camera / screenshot" onClick={() => setShowCamera(true)}>
                 <CameraIcon />
+              </ToolBtn>
+
+              <ToolBtn
+                title="Save last reply to Canvas"
+                onClick={saveToCanvas}
+                dim={!messages.some((m) => m.role === 'assistant')}
+              >
+                <CanvasIcon />
               </ToolBtn>
 
               <div className="w-px h-4 bg-border-hair mx-1" />
@@ -656,6 +678,15 @@ function StopIcon() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
       <rect x="1" y="1" width="8" height="8" rx="1" fill="#F4F4F6" />
+    </svg>
+  );
+}
+function CanvasIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
     </svg>
   );
 }

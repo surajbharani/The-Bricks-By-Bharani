@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSession, type Message } from '../store/useSession';
+import { CoTSection } from './CoTSection';
 
 export function ChatStream() {
   const { messages } = useSession();
@@ -49,6 +50,7 @@ export function ChatStream() {
 // ── Single message bubble ─────────────────────────────────────────────────────
 function MessageBubble({ msg }: { msg: Message }) {
   const isUser = msg.role === 'user';
+  const { thinking } = useSession();
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   const speak = () => {
@@ -116,6 +118,7 @@ function MessageBubble({ msg }: { msg: Message }) {
           {msg.streaming && <span className="caret" />}
 
           {/* TTS button on assistant messages */}
+
           {!isUser && !msg.streaming && msg.content && (
             <button
               onClick={speak}
@@ -129,6 +132,11 @@ function MessageBubble({ msg }: { msg: Message }) {
             </button>
           )}
         </div>
+
+        {/* Chain-of-thought reasoning (collapsible) */}
+        {!isUser && msg.reasoning && thinking.showSteps && (
+          <CoTSection text={msg.reasoning} />
+        )}
       </div>
     </motion.div>
   );

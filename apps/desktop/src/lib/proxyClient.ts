@@ -9,6 +9,10 @@ export type ContentBlock =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } };
 
+export type StreamChunk =
+  | { kind: 'text'; text: string }
+  | { kind: 'reasoning'; text: string };
+
 export interface ChatRequest {
   model: string;
   messages: { role: string; content: string | ContentBlock[] }[];
@@ -43,7 +47,7 @@ function extractText(content: string | ContentBlock[]): string {
   return block?.type === 'text' ? block.text : '';
 }
 
-export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
+export async function* streamChat(req: ChatRequest): AsyncGenerator<StreamChunk> {
   const { signal } = req;
 
   if (import.meta.env.DEV && !import.meta.env.VITE_USE_REAL_PROXY) {
@@ -88,7 +92,7 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
   yield* readSSEStream(res, signal);
 }
 
-async function* streamOpenRouter(req: ChatRequest, signal?: AbortSignal): AsyncGenerator<string> {
+async function* streamOpenRouter(req: ChatRequest, signal?: AbortSignal): AsyncGenerator<StreamChunk> {
   const res = await fetch(OPENROUTER_URL, {
     method: 'POST',
     signal,
@@ -113,9 +117,64 @@ async function* streamOpenRouter(req: ChatRequest, signal?: AbortSignal): AsyncG
   yield* readSSEStream(res, signal);
 }
 
-async function* readSSEStream(res: Response, signal?: AbortSignal): AsyncGenerator<string> {
+// Stateful parser that splits raw text into text vs reasoning chunks
+class ThinkParser {
+  private buf = '';
+  private inThink = false;
+
+  feed(raw: string): StreamChunk[] {
+    const out: StreamChunk[] = [];
+    this.buf += raw;
+
+    while (this.buf.length > 0) {
+      if (this.inThink) {
+        const end = this.buf.indexOf('</think>');
+        if (end === -1) {
+          const safeLen = Math.max(0, this.buf.length - 8);
+          if (safeLen > 0) {
+            out.push({ kind: 'reasoning', text: this.buf.slice(0, safeLen) });
+            this.buf = this.buf.slice(safeLen);
+          }
+          break;
+        }
+        out.push({ kind: 'reasoning', text: this.buf.slice(0, end) });
+        this.buf = this.buf.slice(end + '</think>'.length);
+        this.inThink = false;
+      } else {
+        const start = this.buf.indexOf('<think>');
+        if (start === -1) {
+          const safeLen = Math.max(0, this.buf.length - 6);
+          if (safeLen > 0) {
+            out.push({ kind: 'text', text: this.buf.slice(0, safeLen) });
+            this.buf = this.buf.slice(safeLen);
+          }
+          break;
+        }
+        if (start > 0) {
+          out.push({ kind: 'text', text: this.buf.slice(0, start) });
+        }
+        this.buf = this.buf.slice(start + '<think>'.length);
+        this.inThink = true;
+      }
+    }
+
+    return out;
+  }
+
+  flush(): StreamChunk[] {
+    if (!this.buf) return [];
+    const kind: StreamChunk['kind'] = this.inThink ? 'reasoning' : 'text';
+    const chunks: StreamChunk[] = [{ kind, text: this.buf }];
+    this.buf = '';
+    this.inThink = false;
+    return chunks;
+  }
+}
+
+async function* readSSEStream(res: Response, signal?: AbortSignal): AsyncGenerator<StreamChunk> {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
+  const parser = new ThinkParser();
   let buf = '';
 
   try {
@@ -129,30 +188,39 @@ async function* readSSEStream(res: Response, signal?: AbortSignal): AsyncGenerat
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const data = line.slice(6).trim();
-        if (data === '[DONE]') return;
+        if (data === '[DONE]') {
+          for (const chunk of parser.flush()) yield chunk;
+          return;
+        }
         try {
           const chunk = JSON.parse(data);
-          const text = chunk.choices?.[0]?.delta?.content;
-          if (text) yield text;
+          // DeepSeek Reasoner streams reasoning via reasoning_content field
+          const reasoningDelta = chunk.choices?.[0]?.delta?.reasoning_content as string | undefined;
+          const textDelta = chunk.choices?.[0]?.delta?.content as string | undefined;
+          if (reasoningDelta) yield { kind: 'reasoning', text: reasoningDelta };
+          if (textDelta) {
+            for (const c of parser.feed(textDelta)) yield c;
+          }
         } catch { /* skip malformed chunks */ }
       }
     }
+    for (const chunk of parser.flush()) yield chunk;
   } finally {
     reader.cancel().catch(() => {});
   }
 }
 
-async function* stubStream(prompt: string): AsyncGenerator<string> {
+async function* stubStream(prompt: string): AsyncGenerator<StreamChunk> {
   const reply =
     `You asked: "${prompt}"\n\n` +
     `I'm **Nano Bricks**, your AI agent. ` +
     `Switch to **Agent mode** to watch me plan, execute, and verify tasks step by step — ` +
     `or use **Team mode** to run parallel sub-agents for faster results.\n\n` +
     `*(This is a preview stub — connect the proxy to get real AI responses.)*`;
-  for (const char of reply) { yield char; await delay(18); }
+  for (const char of reply) { yield { kind: 'text', text: char }; await delay(18); }
 }
 
-async function* devStub(): AsyncGenerator<string> {
+async function* devStub(): AsyncGenerator<StreamChunk> {
   const reply =
     `**Developer mode** — OpenRouter key not embedded in this build.\n\n` +
     `To test real AI responses:\n` +
@@ -160,7 +228,7 @@ async function* devStub(): AsyncGenerator<string> {
     `2. Re-trigger the Windows build from GitHub Actions\n` +
     `3. Install the new build\n\n` +
     `Everything else in the app works normally.`;
-  for (const char of reply) { yield char; await delay(12); }
+  for (const char of reply) { yield { kind: 'text', text: char }; await delay(12); }
 }
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));

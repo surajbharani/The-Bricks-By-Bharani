@@ -8,8 +8,8 @@ export type AgentMode = 'solo' | 'swarm';
 export interface Attachment {
   type: 'image' | 'file' | 'search' | 'youtube';
   name: string;
-  dataUrl?: string;   // base64 data URL for images
-  text?: string;      // extracted text (files) or formatted context (search)
+  dataUrl?: string;
+  text?: string;
   mimeType?: string;
 }
 
@@ -17,9 +17,21 @@ export interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  reasoning?: string;
   streaming?: boolean;
   timestamp: number;
   attachments?: Attachment[];
+}
+
+export interface ThinkingConfig {
+  enabled: boolean;
+  showSteps: boolean;
+  budget: 'fast' | 'thorough';
+}
+
+export interface CanvasDoc {
+  title: string;
+  content: string;
 }
 
 interface SessionState {
@@ -28,15 +40,22 @@ interface SessionState {
   model: string;
   messages: Message[];
   isStreaming: boolean;
+  thinking: ThinkingConfig;
+  canvas: CanvasDoc;
+  showCanvas: boolean;
 
   setMode: (mode: AppMode) => void;
   setAgentMode: (agentMode: AgentMode) => void;
   setModel: (model: string) => void;
   addMessage: (msg: Omit<Message, 'id' | 'timestamp'>) => string;
   appendToMessage: (id: string, text: string) => void;
+  appendReasoning: (id: string, text: string) => void;
   finalizeMessage: (id: string) => void;
   clearMessages: () => void;
   setStreaming: (v: boolean) => void;
+  setThinking: (patch: Partial<ThinkingConfig>) => void;
+  setShowCanvas: (v: boolean) => void;
+  updateCanvas: (patch: Partial<CanvasDoc>) => void;
 }
 
 export const useSession = create<SessionState>()(
@@ -47,6 +66,9 @@ export const useSession = create<SessionState>()(
       model: DEFAULT_MODEL,
       messages: [],
       isStreaming: false,
+      thinking: { enabled: false, showSteps: true, budget: 'fast' },
+      canvas: { title: 'Untitled', content: '' },
+      showCanvas: false,
 
       setMode: (mode) => set({ mode }),
       setAgentMode: (agentMode) => set({ agentMode }),
@@ -67,6 +89,13 @@ export const useSession = create<SessionState>()(
           ),
         })),
 
+      appendReasoning: (id, text) =>
+        set((s) => ({
+          messages: s.messages.map((m) =>
+            m.id === id ? { ...m, reasoning: (m.reasoning ?? '') + text } : m
+          ),
+        })),
+
       finalizeMessage: (id) =>
         set((s) => ({
           messages: s.messages.map((m) =>
@@ -76,10 +105,22 @@ export const useSession = create<SessionState>()(
 
       clearMessages: () => set({ messages: [] }),
       setStreaming: (isStreaming) => set({ isStreaming }),
+      setThinking: (patch) =>
+        set((s) => ({ thinking: { ...s.thinking, ...patch } })),
+      setShowCanvas: (showCanvas) => set({ showCanvas }),
+      updateCanvas: (patch) =>
+        set((s) => ({ canvas: { ...s.canvas, ...patch } })),
     }),
     {
       name: 'nano-bricks-session',
-      partialize: (s) => ({ mode: s.mode, agentMode: s.agentMode, model: s.model }),
+      partialize: (s) => ({
+        mode: s.mode,
+        agentMode: s.agentMode,
+        model: s.model,
+        thinking: s.thinking,
+        canvas: s.canvas,
+        showCanvas: s.showCanvas,
+      }),
     }
   )
 );

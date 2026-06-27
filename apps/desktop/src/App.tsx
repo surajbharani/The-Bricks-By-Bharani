@@ -3,8 +3,10 @@ import { Sidebar } from './components/Sidebar';
 import { ModeToggle } from './components/ModeToggle';
 import { SwarmToggle } from './components/SwarmToggle';
 import { ModelDropdown } from './components/ModelDropdown';
+import { ThinkingToggle } from './components/ThinkingToggle';
 import { ChatStream } from './components/ChatStream';
 import { Composer } from './components/Composer';
+import { Canvas } from './components/Canvas';
 import { RunView } from './components/RunView';
 import { RunHeader } from './components/RunHeader';
 import { AgentComposer } from './components/AgentComposer';
@@ -21,7 +23,7 @@ const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in windo
 
 function App() {
   const { session, loading } = useAuth();
-  const { mode } = useSession();
+  const { mode, showCanvas, setShowCanvas } = useSession();
   const { resetRun } = useRun();
 
   // Handle confirmation deep-link: nano-bricks://auth/callback#access_token=...
@@ -86,6 +88,21 @@ function App() {
             <SwarmToggle />
           </div>
           <div className="flex items-center gap-2">
+            {!isAgent && <ThinkingToggle />}
+            {!isAgent && (
+              <button
+                onClick={() => setShowCanvas(!showCanvas)}
+                title={showCanvas ? 'Close Canvas' : 'Open Canvas editor'}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                  showCanvas
+                    ? 'bg-red-core/15 border-red-core/40 text-red-core'
+                    : 'bg-bg-panel border-border-hair text-text-lo hover:text-text-hi hover:border-red-core/30'
+                }`}
+              >
+                <CanvasIcon active={showCanvas} />
+                Canvas
+              </button>
+            )}
             <UsageMeter />
             <ModelDropdown />
           </div>
@@ -97,6 +114,10 @@ function App() {
             <RunView />
             <AgentComposer />
           </main>
+        ) : showCanvas ? (
+          <main className="flex flex-col flex-1 min-h-0">
+            <Canvas />
+          </main>
         ) : (
           <main className="flex flex-col flex-1 min-h-0">
             <ChatStream />
@@ -105,6 +126,17 @@ function App() {
         )}
       </div>
     </div>
+  );
+}
+
+function CanvasIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+      stroke={active ? '#FF1F2E' : 'currentColor'} strokeWidth="2" strokeLinecap="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <line x1="3" y1="9" x2="21" y2="9" />
+      <line x1="9" y1="21" x2="9" y2="9" />
+    </svg>
   );
 }
 
