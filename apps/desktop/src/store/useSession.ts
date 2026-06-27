@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_MODEL } from '@nano-bricks/shared';
 import { useHistory } from './useHistory';
+import { useProjects } from './useProjects';
 
 export type AppMode = 'chat' | 'agent';
 export type AgentMode = 'solo' | 'swarm';
@@ -48,6 +49,7 @@ interface SessionState {
 
   setMode: (mode: AppMode) => void;
   setAgentMode: (agentMode: AgentMode) => void;
+  setActiveProject: (id: string | null) => void;
   setModel: (model: string) => void;
   addMessage: (msg: Omit<Message, 'id' | 'timestamp'>) => string;
   appendToMessage: (id: string, text: string) => void;
@@ -87,6 +89,9 @@ export const useSession = create<SessionState>()(
       setMode: (mode) => set({ mode }),
       setAgentMode: (agentMode) => set({ agentMode }),
       setModel: (model) => set({ model }),
+      setActiveProject: (id) => {
+        useProjects.getState().setActiveProject(id);
+      },
 
       addMessage: (msg) => {
         const id = makeId();
@@ -127,6 +132,7 @@ export const useSession = create<SessionState>()(
             title: deriveTitle(finalized),
             messages: finalized,
             model: s.model,
+            projectId: useProjects.getState().activeProjectId ?? undefined,
             createdAt: finalized[0]?.timestamp ?? Date.now(),
             updatedAt: Date.now(),
           });
@@ -142,6 +148,7 @@ export const useSession = create<SessionState>()(
             title: deriveTitle(s.messages),
             messages: s.messages,
             model: s.model,
+            projectId: useProjects.getState().activeProjectId ?? undefined,
             createdAt: s.messages[0]?.timestamp ?? Date.now(),
             updatedAt: Date.now(),
           });

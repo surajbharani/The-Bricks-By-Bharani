@@ -15,6 +15,7 @@ import { UsageMeter } from './components/UsageMeter';
 import { useAuth } from './store/useAuth';
 import { useSession } from './store/useSession';
 import { useRun } from './store/useRun';
+import { useProjects } from './store/useProjects';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { supabase } from './lib/supabase';
@@ -25,6 +26,8 @@ function App() {
   const { session, loading } = useAuth();
   const { mode, showCanvas, setShowCanvas } = useSession();
   const { resetRun } = useRun();
+  const { projects, activeProjectId } = useProjects();
+  const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
 
   // Handle confirmation deep-link: nano-bricks://auth/callback#access_token=...
   // Tauri emits 'auth-deep-link' from lib.rs when the scheme is triggered
@@ -86,6 +89,14 @@ function App() {
           <div className="flex items-center gap-2">
             <ModeToggle />
             <SwarmToggle />
+            {activeProject && (
+              <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-core/10 border border-red-core/20 text-[10px] text-red-core font-medium">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+                {activeProject.name}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {!isAgent && <ThinkingToggle />}

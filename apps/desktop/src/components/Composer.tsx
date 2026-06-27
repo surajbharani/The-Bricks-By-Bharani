@@ -4,6 +4,8 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSession, type Attachment } from '../store/useSession';
 import { streamChat, modelSupportsVision, type ContentBlock } from '../lib/proxyClient';
+import { useProjects } from '../store/useProjects';
+import { useMemory } from '../store/useMemory';
 
 import {
   googleSearch, youtubeSearch,
@@ -188,6 +190,10 @@ export function Composer() {
     updateCanvas,
   } = useSession();
 
+  const { projects, activeProjectId } = useProjects();
+  const { settings: memSettings, facts } = useMemory();
+  const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
+
   const [text, setText]             = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isListening, setIsListening] = useState(false);
@@ -361,15 +367,31 @@ export function Composer() {
     const asstMsgId = addMessage({ role: 'assistant', content: '', streaming: true });
     setStreaming(true);
 
+    // Build system context (global instructions + memory + project)
+    const systemParts: string[] = [];
+    if (memSettings.globalSystemPrompt) systemParts.push(memSettings.globalSystemPrompt);
+    if (memSettings.memoryEnabled && facts.length) {
+      systemParts.push(`[What I remember about you]\n${facts.map((f) => `- ${f.text}`).join('\n')}`);
+    }
+    if (activeProject?.systemPrompt) systemParts.push(activeProject.systemPrompt);
+    if (activeProject?.memory) systemParts.push(`[Project memory]\n${activeProject.memory}`);
+    if (activeProject?.files && activeProject.files.length > 0) {
+      systemParts.push(activeProject.files.map((f) => `[File: ${f.name}]\n${f.text}`).join('\n\n'));
+    }
+
     // Build full conversation history for context (finalized messages only, no images in history)
     const historyMsgs = messages
       .filter((m) => !m.streaming && m.content)
       .map((m) => ({ role: m.role, content: m.content }));
 
+    const systemMsg = systemParts.length > 0
+      ? [{ role: 'system' as const, content: systemParts.join('\n\n') }]
+      : [];
+
     try {
       const gen = streamChat({
         model,
-        messages: [...historyMsgs, { role: 'user', content: apiContent }],
+        messages: [...systemMsg, ...historyMsgs, { role: 'user', content: apiContent }],
         signal: ctrl.signal,
       });
       for await (const chunk of gen) {

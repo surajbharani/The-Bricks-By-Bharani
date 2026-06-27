@@ -9,6 +9,7 @@ export interface Conversation {
   title: string;      // first user message, truncated
   messages: Message[];
   model: string;
+  projectId?: string;
   createdAt: number;
   updatedAt: number;
 }
