@@ -1,7 +1,11 @@
 import { useSession } from '../store/useSession';
 import { useAuth } from '../store/useAuth';
 
-export function Sidebar() {
+interface SidebarProps {
+  onOpenShortcuts?: () => void;
+}
+
+export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
   const { messages, clearMessages } = useSession();
   const { user, signOut } = useAuth();
 
@@ -51,6 +55,16 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="px-3 py-3 border-t border-border-hair">
+        {onOpenShortcuts && (
+          <button
+            onClick={onOpenShortcuts}
+            title="Keyboard shortcuts (Ctrl+K)"
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-text-lo hover:text-text-hi hover:bg-bg-elevated transition-colors mb-1"
+          >
+            <span className="text-sm">⌨</span>
+            <span>Keyboard shortcuts</span>
+          </button>
+        )}
         <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg group">
           <div className="w-6 h-6 rounded-full bg-bg-elevated border border-border-hair flex items-center justify-center text-[10px] text-text-hi font-bold flex-shrink-0">
             {user?.email?.[0]?.toUpperCase() ?? '?'}
