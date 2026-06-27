@@ -31,6 +31,7 @@ def run_swarm(
     workspace: Path,
     jwt: str,
     caps: dict,
+    client: OpenAI | None = None,
 ) -> dict:
     """
     Run bricks in parallel, respecting dependency DAG.
@@ -70,8 +71,8 @@ def run_swarm(
 
         emit_subagent(agent_id, brick["goal"], "working")
 
-        client = make_client(jwt)
-        result = run_solo(enriched_query, model, brick_workspace, client, brick_caps)
+        brick_client = client if client is not None else make_client(jwt)
+        result = run_solo(enriched_query, model, brick_workspace, brick_client, brick_caps)
         summary = _compress_summary(result)
 
         with lock:

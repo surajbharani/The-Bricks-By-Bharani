@@ -111,7 +111,7 @@ def _run_swarm(query, model, workspace, jwt, client, caps):
 
     emit_thinking(f"Running {len(bricks)} parallel bricks.")
     try:
-        result = run_swarm(query, bricks, model, workspace, jwt, caps)
+        result = run_swarm(query, bricks, model, workspace, jwt, caps, client=client)
         if not result.get("ok"):
             _emit_error("Swarm completed with errors. Check brick summaries above.")
     except Exception as e:
