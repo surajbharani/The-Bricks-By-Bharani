@@ -71,6 +71,14 @@ export function Composer() {
     return () => document.removeEventListener('mousedown', handler);
   }, [plusOpen]);
 
+  // Global Escape — dismiss active mode regardless of which element has focus
+  useEffect(() => {
+    if (!activeMode) return;
+    const handler = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setActiveMode(null); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [activeMode]);
+
   // Focus composer on Ctrl+L
   useEffect(() => {
     const handler = () => { setText(''); textareaRef.current?.focus(); };
@@ -278,8 +286,9 @@ export function Composer() {
                 )}
 
                 <button
-                  onClick={() => setActiveMode(null)}
-                  className="text-red-core/60 hover:text-red-core text-xs ml-2"
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setActiveMode(null); }}
+                  className="text-red-core/60 hover:text-red-core text-xs ml-2 px-1"
                   aria-label="Cancel mode"
                 >
                   ✕
