@@ -150,6 +150,18 @@ export const useSession = create<SessionState>()(
       },
 
       loadConversation: (id) => {
+        const s = get();
+        // Save current conversation before switching (if it has messages)
+        if (s.messages.some((m) => m.role === 'user')) {
+          useHistory.getState().upsertConversation({
+            id: s.conversationId,
+            title: deriveTitle(s.messages),
+            messages: s.messages,
+            model: s.model,
+            createdAt: s.messages[0]?.timestamp ?? Date.now(),
+            updatedAt: Date.now(),
+          });
+        }
         const conv = useHistory.getState().conversations.find((c) => c.id === id);
         if (!conv) return;
         set({

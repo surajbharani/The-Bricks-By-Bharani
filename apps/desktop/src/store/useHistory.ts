@@ -79,7 +79,11 @@ export const useHistory = create<HistoryState>()(
             ...m,
             streaming: false, // never persist streaming state
             attachments: m.attachments?.map((a) =>
-              a.type === 'image' ? { ...a, dataUrl: undefined } : a
+              a.type === 'image'
+                ? { ...a, dataUrl: undefined }
+                : a.type === 'file'
+                  ? { ...a, text: a.text?.slice(0, 500) }
+                  : a
             ),
           })),
         })),

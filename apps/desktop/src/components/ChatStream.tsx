@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useSession, type Message } from '../store/useSession';
+import { useSession, type Message, type ThinkingConfig } from '../store/useSession';
 import { CoTSection } from './CoTSection';
 
 export function ChatStream() {
-  const { messages } = useSession();
+  const { messages, thinking } = useSession();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -39,7 +39,7 @@ export function ChatStream() {
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
       <AnimatePresence initial={false}>
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} />
+          <MessageBubble key={msg.id} msg={msg} thinking={thinking} />
         ))}
       </AnimatePresence>
       <div ref={bottomRef} />
@@ -48,9 +48,8 @@ export function ChatStream() {
 }
 
 // ── Single message bubble ─────────────────────────────────────────────────────
-function MessageBubble({ msg }: { msg: Message }) {
+function MessageBubble({ msg, thinking }: { msg: Message; thinking: ThinkingConfig }) {
   const isUser = msg.role === 'user';
-  const { thinking } = useSession();
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   const speak = () => {
