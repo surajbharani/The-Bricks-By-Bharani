@@ -56,7 +56,29 @@ export function Canvas() {
 
   const handleExport = (fmt: 'md' | 'txt' | 'pdf') => {
     if (fmt === 'pdf') {
+      // Switch to preview so there's rendered HTML to print
+      if (viewMode === 'edit') setViewMode('preview');
+      // Inject a print style that hides everything except the canvas preview area
+      const style = document.createElement('style');
+      style.id = 'canvas-print-style';
+      style.textContent = `
+        @media print {
+          body * { visibility: hidden !important; }
+          .canvas-print, .canvas-print * { visibility: visible !important; }
+          .canvas-print {
+            position: fixed !important;
+            inset: 0 !important;
+            overflow: visible !important;
+            background: white !important;
+            color: black !important;
+            padding: 2cm !important;
+          }
+        }
+      `;
+      document.head.appendChild(style);
       window.print();
+      // Remove after print dialog closes
+      setTimeout(() => style.remove(), 500);
       return;
     }
     const mime = fmt === 'md' ? 'text/markdown' : 'text/plain';

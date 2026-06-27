@@ -361,8 +361,17 @@ export function Composer() {
     const asstMsgId = addMessage({ role: 'assistant', content: '', streaming: true });
     setStreaming(true);
 
+    // Build full conversation history for context (finalized messages only, no images in history)
+    const historyMsgs = messages
+      .filter((m) => !m.streaming && m.content)
+      .map((m) => ({ role: m.role, content: m.content }));
+
     try {
-      const gen = streamChat({ model, messages: [{ role: 'user', content: apiContent }], signal: ctrl.signal });
+      const gen = streamChat({
+        model,
+        messages: [...historyMsgs, { role: 'user', content: apiContent }],
+        signal: ctrl.signal,
+      });
       for await (const chunk of gen) {
         if (ctrl.signal.aborted) break;
         if (chunk.kind === 'reasoning') {
