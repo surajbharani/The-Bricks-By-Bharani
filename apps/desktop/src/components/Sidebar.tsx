@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { useSession } from '../store/useSession';
 import { useHistory, type Conversation } from '../store/useHistory';
 import { useAuth } from '../store/useAuth';
@@ -20,6 +20,19 @@ export function Sidebar() {
   const [folderMenuId, setFolderMenuId] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // Close folder menu on outside click
+  React.useEffect(() => {
+    if (!folderMenuId) return;
+    const handler = (e: MouseEvent) => {
+      if (!(e.target as Element).closest('[data-folder-menu]')) {
+        setFolderMenuId(null);
+        setNewFolderName('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [folderMenuId]);
 
   const sortedRuns = [...agentRuns].sort((a, b) => b.createdAt - a.createdAt);
 
@@ -111,12 +124,13 @@ export function Sidebar() {
             <ArchiveIcon />
           </ActionBtn>
           {/* Folder */}
-          <div className="relative">
+          <div className="relative" data-folder-menu>
             <ActionBtn title="Move to folder" onClick={(e) => { e.stopPropagation(); setFolderMenuId(folderMenuId === conv.id ? null : conv.id); }}>
               <FolderBtnIcon />
             </ActionBtn>
             {folderMenuId === conv.id && (
               <div
+                data-folder-menu
                 className="absolute right-0 top-full mt-1 bg-bg-panel border border-border-hair rounded-xl shadow-xl z-30 min-w-[130px] overflow-hidden"
                 onClick={(e) => e.stopPropagation()}
               >
@@ -156,8 +170,7 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="w-56 flex-shrink-0 bg-bg-panel border-r border-border-hair flex flex-col h-full"
-      onClick={() => { setFolderMenuId(null); }}>
+    <aside className="w-56 flex-shrink-0 bg-bg-panel border-r border-border-hair flex flex-col h-full">
       {/* Logo */}
       <div className="px-4 py-4 border-b border-border-hair">
         <div className="flex items-center gap-2">
@@ -281,7 +294,7 @@ export function Sidebar() {
                     {relativeTime(run.createdAt)} · {run.tokensUsed.toLocaleString()} tokens
                   </p>
                 </div>
-                <ActionBtn title="Delete" onClick={() => deleteAgentRun(run.id)}>
+                <ActionBtn title="Delete" onClick={(e) => { e.stopPropagation(); deleteAgentRun(run.id); }}>
                   <TrashIcon />
                 </ActionBtn>
               </div>
@@ -324,7 +337,7 @@ export function Sidebar() {
 }
 
 // ── Small action button ───────────────────────────────────────────────────────
-function ActionBtn({ children, onClick, title }: { children: React.ReactNode; onClick: (e: React.MouseEvent) => void; title: string }) {
+function ActionBtn({ children, onClick, title }: { children: React.ReactNode; onClick: (e: React.MouseEvent<HTMLButtonElement>) => void; title: string }) {
   return (
     <button
       onClick={onClick}

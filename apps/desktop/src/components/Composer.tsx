@@ -193,6 +193,18 @@ export function Composer() {
   } = useSession();
 
   const [showLengthMenu, setShowLengthMenu] = useState(false);
+  const lengthMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showLengthMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (lengthMenuRef.current && !lengthMenuRef.current.contains(e.target as Node)) {
+        setShowLengthMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showLengthMenu]);
 
   const { projects, activeProjectId } = useProjects();
   const { settings: memSettings, facts } = useMemory();
@@ -316,17 +328,19 @@ export function Composer() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regeneratePayload]);
 
-  // ── Send ────────────────────────────────────────────────────────────────────
+  // ── Internal send for regenerate / editAndResend ─────────────────────────────
   const sendWithText = async (forcedText: string) => {
     if (isStreaming) return;
     const trimmed = forcedText.trim();
     if (!trimmed) return;
 
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-
-    const asstMsgId = addMessage({ role: 'assistant', content: '', streaming: true });
-    setStreaming(true);
+    // Ensure the user message is visible in the store.
+    // After regenerate() the user msg is already there; after editAndResend() it was sliced away.
+    const latestMsgs = messages.filter((m) => !m.streaming);
+    const lastMsg = latestMsgs[latestMsgs.length - 1];
+    if (!lastMsg || lastMsg.role !== 'user' || lastMsg.content !== trimmed) {
+      addMessage({ role: 'user', content: trimmed });
+    }
 
     const systemParts: string[] = [];
     const lengthHint: Record<string, string> = {
@@ -345,13 +359,23 @@ export function Composer() {
       systemParts.push(activeProject.files.map((f) => `[File: ${f.name}]\n${f.text}`).join('\n\n'));
     }
 
-    const historyMsgs = messages
-      .filter((m) => !m.streaming && m.content)
+    // Build history, stripping any trailing user message to avoid duplication
+    // (regenerate() leaves the user msg in the store; we append it explicitly below)
+    const allHistory = latestMsgs
+      .filter((m) => m.content)
       .map((m) => ({ role: m.role, content: m.content }));
+    const historyMsgs = allHistory[allHistory.length - 1]?.role === 'user'
+      ? allHistory.slice(0, -1)
+      : allHistory;
 
     const systemMsg = systemParts.length > 0
       ? [{ role: 'system' as const, content: systemParts.join('\n\n') }]
       : [];
+
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    const asstMsgId = addMessage({ role: 'assistant', content: '', streaming: true });
+    setStreaming(true);
 
     try {
       const gen = streamChat({
@@ -666,7 +690,7 @@ export function Composer() {
             {/* Right: length pill + send / stop button */}
             <div className="flex items-center gap-1.5">
               {/* Response length pill */}
-              <div className="relative">
+              <div className="relative" ref={lengthMenuRef}>
                 <button
                   onClick={() => setShowLengthMenu((v) => !v)}
                   className="flex items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-medium text-text-lo hover:text-text-hi border border-border-hair hover:border-red-core/30 transition-colors"
