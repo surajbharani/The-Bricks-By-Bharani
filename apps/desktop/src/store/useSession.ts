@@ -6,9 +6,18 @@ export type AppMode = 'chat' | 'agent';
 export type AgentMode = 'solo' | 'swarm';
 
 export interface Attachment {
-  type: 'image';
-  url: string;
-  prompt: string;
+  type: 'image-gen' | 'image-upload' | 'file' | 'search';
+  /** For image-gen and image-upload: display/proxy URL or data-URL */
+  url?: string;
+  /** For image-gen: the generation prompt */
+  prompt?: string;
+  /** For image-upload / camera: base64 data URL */
+  dataUrl?: string;
+  /** For file attachments: extracted text */
+  text?: string;
+  /** Human-readable label */
+  name?: string;
+  mimeType?: string;
 }
 
 export interface Message {

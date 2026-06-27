@@ -53,13 +53,32 @@ export function ChatStream() {
             )}
 
             <div className={`max-w-[75%] flex flex-col gap-2`}>
-              {/* Image attachments */}
-              {msg.attachments?.map((att, i) => (
-                <div key={i} className="rounded-xl overflow-hidden border border-border-hair">
-                  <img src={att.url} alt={att.prompt} className="w-full max-w-sm object-cover" />
-                  <p className="px-3 py-1.5 text-[10px] text-text-lo bg-bg-panel">{att.prompt}</p>
-                </div>
-              ))}
+              {/* Attachments */}
+              {msg.attachments?.map((att, i) => {
+                if (att.type === 'image-gen') {
+                  return (
+                    <div key={i} className="rounded-xl overflow-hidden border border-border-hair">
+                      <img src={att.url} alt={att.prompt} className="w-full max-w-sm object-cover" />
+                      <p className="px-3 py-1.5 text-[10px] text-text-lo bg-bg-panel">{att.prompt}</p>
+                    </div>
+                  );
+                }
+                if (att.type === 'image-upload' && att.dataUrl) {
+                  return (
+                    <div key={i} className="rounded-xl overflow-hidden border border-border-hair">
+                      <img src={att.dataUrl} alt={att.name} className="w-full max-w-sm object-cover" />
+                    </div>
+                  );
+                }
+                if (att.type === 'search') {
+                  return (
+                    <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-bg-elevated border border-border-hair text-[10px] text-text-lo">
+                      🔍 {att.name}
+                    </div>
+                  );
+                }
+                return null;
+              })}
 
               {/* Text content */}
               {msg.content && (
