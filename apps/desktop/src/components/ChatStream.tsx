@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useSession, type Message } from '../store/useSession';
+import { useSession, type Message, type Attachment, type WebSource } from '../store/useSession';
 import { CodeRunner } from './CodeRunner';
 
 export function ChatStream() {
@@ -52,9 +52,14 @@ export function ChatStream() {
               </div>
             )}
 
-            <div className={`max-w-[75%] flex flex-col gap-2`}>
-              {/* Attachments */}
-              {msg.attachments?.map((att, i) => {
+            <div className={`max-w-[80%] flex flex-col gap-2`}>
+              {/* Web search block — full Perplexity-style */}
+              {msg.attachments?.find((a) => a.type === 'web-search') && (
+                <WebSearchBlock att={msg.attachments.find((a) => a.type === 'web-search')!} message={msg} />
+              )}
+
+              {/* Other attachments */}
+              {msg.attachments?.filter((a) => a.type !== 'web-search').map((att, i) => {
                 if (att.type === 'image-gen') {
                   return (
                     <div key={i} className="rounded-xl overflow-hidden border border-border-hair">
@@ -80,8 +85,8 @@ export function ChatStream() {
                 return null;
               })}
 
-              {/* Text content */}
-              {msg.content && (
+              {/* Text content — skip for web-search messages (rendered inside WebSearchBlock) */}
+              {msg.content && !msg.attachments?.find((a) => a.type === 'web-search') && (
                 <div
                   className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
                     msg.role === 'user'
@@ -105,7 +110,128 @@ export function ChatStream() {
   );
 }
 
-// Parse and render assistant content, with CodeRunner for fenced code blocks
+// ── Web Search Block (Perplexity-style) ───────────────────────────────────────
+function WebSearchBlock({ att, message }: { att: Attachment; message: Message }) {
+  const status = att.webStatus ?? 'searching';
+  const sources = att.sources ?? [];
+  const query = att.query ?? '';
+
+  const steps: Array<{ id: string; label: string; icon: string }> = [
+    { id: 'searching', label: 'Searching the web', icon: '🔍' },
+    { id: 'reading',   label: 'Reading sources',   icon: '📖' },
+    { id: 'answering', label: 'Generating answer',  icon: '✨' },
+  ];
+
+  const stepOrder = ['searching', 'reading', 'answering', 'done'];
+  const currentIdx = stepOrder.indexOf(status);
+
+  return (
+    <div className="flex flex-col gap-3 w-full">
+      {/* Timeline steps */}
+      <div className="flex flex-col gap-1.5 px-4 py-3 rounded-xl bg-bg-panel border border-border-hair">
+        <p className="text-[10px] text-text-lo uppercase tracking-wide font-mono mb-1">
+          🔍 Web search — {query}
+        </p>
+        {steps.map((step) => {
+          const stepIdx = stepOrder.indexOf(step.id);
+          const isDone = currentIdx > stepIdx || status === 'done';
+          const isActive = stepOrder[currentIdx] === step.id && status !== 'done';
+
+          return (
+            <div key={step.id} className="flex items-center gap-2">
+              <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                {isDone ? (
+                  <motion.span
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="text-ok text-xs"
+                  >✓</motion.span>
+                ) : isActive ? (
+                  <motion.span
+                    animate={{ opacity: [1, 0.3, 1] }}
+                    transition={{ duration: 1, repeat: Infinity }}
+                    className="w-2 h-2 rounded-full bg-red-core block"
+                  />
+                ) : (
+                  <span className="w-2 h-2 rounded-full bg-border-hair block" />
+                )}
+              </div>
+              <span className={`text-xs ${isDone ? 'text-text-lo line-through' : isActive ? 'text-text-hi font-medium' : 'text-text-lo opacity-40'}`}>
+                {step.icon} {step.label}
+              </span>
+              {isActive && (
+                <motion.span
+                  animate={{ opacity: [1, 0, 1] }}
+                  transition={{ duration: 0.8, repeat: Infinity }}
+                  className="text-[10px] text-red-core"
+                >…</motion.span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Sources */}
+      <AnimatePresence>
+        {sources.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            className="overflow-hidden"
+          >
+            <p className="text-[10px] text-text-lo uppercase tracking-wide font-mono mb-1.5 px-1">Sources</p>
+            <div className="flex flex-wrap gap-2">
+              {sources.map((src, idx) => (
+                <SourceChip key={idx} source={src} index={idx + 1} />
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Answer */}
+      <AnimatePresence>
+        {(message.content || message.streaming) && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="px-4 py-3 rounded-2xl rounded-bl-sm bg-bg-panel border border-border-hair text-sm text-text-hi leading-relaxed"
+          >
+            <AssistantContent message={message} />
+            {message.streaming && <span className="caret" />}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function SourceChip({ source, index }: { source: WebSource; index: number }) {
+  const faviconUrl = `https://www.google.com/s2/favicons?domain=${source.domain}&sz=16`;
+
+  return (
+    <motion.a
+      href={source.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ delay: index * 0.05 }}
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-bg-elevated border border-border-hair hover:border-red-core/40 transition-colors group max-w-[200px]"
+      title={source.title}
+    >
+      <img
+        src={faviconUrl}
+        alt=""
+        className="w-3.5 h-3.5 rounded-sm flex-shrink-0"
+        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+      />
+      <span className="text-[10px] text-text-lo group-hover:text-text-hi truncate">[{index}] {source.domain}</span>
+    </motion.a>
+  );
+}
+
+// ── Assistant text renderer ────────────────────────────────────────────────────
 function AssistantContent({ message }: { message: Message }) {
   const parts = parseCodeBlocks(message.content);
 

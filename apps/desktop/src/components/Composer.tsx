@@ -2,7 +2,7 @@ import {
   useState, useRef, useEffect, useCallback, type KeyboardEvent,
 } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useSession, type Attachment } from '../store/useSession';
+import { useSession, type Attachment, type WebSource } from '../store/useSession';
 import { useTools } from '../store/useTools';
 import { useToast } from '../store/useToast';
 import { streamChat } from '../lib/proxyClient';
@@ -43,7 +43,7 @@ async function extractFileText(file: File): Promise<string> {
 type ActiveMode = 'web' | 'image' | null;
 
 export function Composer() {
-  const { mode, agentMode, model, messages, addMessage, appendToMessage, finalizeMessage, setStreaming, isStreaming } =
+  const { mode, agentMode, model, messages, addMessage, appendToMessage, updateMessage, finalizeMessage, setStreaming, isStreaming } =
     useSession();
   const { isEnabled } = useTools();
   const { addToast, removeToast } = useToast();
@@ -172,24 +172,62 @@ export function Composer() {
     setAttachments([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
-    // ── Web search mode ────────────────────────────────────────────────────
-    let contextPrefix = '';
+    // ── Web search mode — Perplexity-style live timeline ──────────────────
     if (activeMode === 'web' && trimmed) {
       setActiveMode(null);
-      const toastId = addToast({ message: 'Searching the web…', type: 'info', duration: 0 });
+      addMessage({ role: 'user', content: trimmed });
+
+      // Create assistant message with live web-search attachment
+      const asstMsgId = addMessage({
+        role: 'assistant',
+        content: '',
+        streaming: true,
+        attachments: [{ type: 'web-search', webStatus: 'searching', query: trimmed, sources: [] }],
+      });
+      setStreaming(true);
+
+      let sources: WebSource[] = [];
+      let contextPrefix = '';
       try {
+        // Step 1 — searching (already shown)
+        await new Promise((r) => setTimeout(r, 600));
+
+        // Step 2 — reading
+        updateMessage(asstMsgId, {
+          attachments: [{ type: 'web-search', webStatus: 'reading', query: trimmed, sources: [] }],
+        });
         const results = await searchWeb(trimmed);
+        sources = results;
         contextPrefix = formatResultsAsContext(trimmed, results);
-        removeToast(toastId);
-      } catch {
-        removeToast(toastId);
-        addToast({ message: 'Web search failed — sending without results.', type: 'error', duration: 3000 });
+
+        // Step 3 — answering
+        updateMessage(asstMsgId, {
+          attachments: [{ type: 'web-search', webStatus: 'answering', query: trimmed, sources }],
+        });
+        await new Promise((r) => setTimeout(r, 300));
+
+        const historyMsgs = messages
+          .filter((m) => !m.streaming && m.content)
+          .map((m) => ({ role: m.role, content: m.content }));
+        const gen = streamChat({ model, messages: [...historyMsgs, { role: 'user', content: contextPrefix }] });
+        for await (const chunk of gen) appendToMessage(asstMsgId, chunk);
+      } catch (err) {
+        if (err instanceof Error) appendToMessage(asstMsgId, `\n\n*Error: ${err.message}*`);
+      } finally {
+        updateMessage(asstMsgId, {
+          streaming: false,
+          attachments: [{ type: 'web-search', webStatus: 'done', query: trimmed, sources }],
+        });
+        setStreaming(false);
+        finalizeMessage(asstMsgId);
       }
-    } else {
-      setActiveMode(null);
+      return;
     }
 
+    setActiveMode(null);
+
     // File context prefix
+    let contextPrefix = '';
     for (const fa of snap.filter((a) => a.type === 'file')) {
       contextPrefix += `[File: ${fa.name}]\n${(fa.text ?? '').slice(0, 6000)}\n---\n\n`;
     }

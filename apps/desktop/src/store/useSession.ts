@@ -5,8 +5,15 @@ import { DEFAULT_MODEL } from '@nano-bricks/shared';
 export type AppMode = 'chat' | 'agent';
 export type AgentMode = 'solo' | 'swarm';
 
+export interface WebSource {
+  title: string;
+  snippet: string;
+  url: string;
+  domain: string;
+}
+
 export interface Attachment {
-  type: 'image-gen' | 'image-upload' | 'file' | 'search';
+  type: 'image-gen' | 'image-upload' | 'file' | 'search' | 'web-search';
   /** For image-gen and image-upload: display/proxy URL or data-URL */
   url?: string;
   /** For image-gen: the generation prompt */
@@ -18,6 +25,12 @@ export interface Attachment {
   /** Human-readable label */
   name?: string;
   mimeType?: string;
+  /** For web-search: live status */
+  webStatus?: 'searching' | 'reading' | 'answering' | 'done';
+  /** For web-search: search query */
+  query?: string;
+  /** For web-search: resolved sources */
+  sources?: WebSource[];
 }
 
 export interface Message {
@@ -41,6 +54,7 @@ interface SessionState {
   setModel: (model: string) => void;
   addMessage: (msg: Omit<Message, 'id' | 'timestamp'>) => string;
   appendToMessage: (id: string, text: string) => void;
+  updateMessage: (id: string, updates: Partial<Omit<Message, 'id'>>) => void;
   finalizeMessage: (id: string) => void;
   clearMessages: () => void;
   setStreaming: (v: boolean) => void;
@@ -71,6 +85,13 @@ export const useSession = create<SessionState>()(
         set((s) => ({
           messages: s.messages.map((m) =>
             m.id === id ? { ...m, content: m.content + text } : m
+          ),
+        })),
+
+      updateMessage: (id, updates) =>
+        set((s) => ({
+          messages: s.messages.map((m) =>
+            m.id === id ? { ...m, ...updates } : m
           ),
         })),
 
