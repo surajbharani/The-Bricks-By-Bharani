@@ -21,10 +21,16 @@ export async function fetchFromProvider(
   const url = useOpenRouter ? OPENROUTER_URL : DEEPSEEK_URL;
   const apiKey = useOpenRouter ? env.OPENROUTER_KEY : env.DEEPSEEK_KEY;
 
-  // Strip leading "openrouter/" prefix before sending to OpenRouter
-  const upstreamBody = useOpenRouter && body.model.startsWith('openrouter/')
-    ? { ...body, model: body.model.slice('openrouter/'.length) }
-    : body;
+  // Normalize model ID for each upstream:
+  // - openrouter/X/Y  → X/Y  (strip "openrouter/" prefix)
+  // - deepseek/X      → X    (strip "deepseek/" prefix for DeepSeek API)
+  let upstreamModel = body.model;
+  if (useOpenRouter && body.model.startsWith('openrouter/')) {
+    upstreamModel = body.model.slice('openrouter/'.length);
+  } else if (!useOpenRouter && body.model.startsWith('deepseek/')) {
+    upstreamModel = body.model.slice('deepseek/'.length);
+  }
+  const upstreamBody = { ...body, model: upstreamModel };
 
   const upstream = await fetch(url, {
     method: 'POST',
@@ -41,7 +47,7 @@ export async function fetchFromProvider(
     body: JSON.stringify({ ...upstreamBody, stream: true }),
   });
 
-  // If DeepSeek fails, fall back to OpenRouter
+  // If DeepSeek fails, fall back to OpenRouter using the normalized model name
   if (!upstream.ok && !useOpenRouter) {
     const fallback = await fetch(OPENROUTER_URL, {
       method: 'POST',
@@ -51,7 +57,7 @@ export async function fetchFromProvider(
         'HTTP-Referer': 'https://nanobricks.app',
         'X-Title': 'Nano Bricks',
       },
-      body: JSON.stringify({ ...body, stream: true }),
+      body: JSON.stringify({ ...upstreamBody, stream: true }),
     });
     return fallback;
   }
