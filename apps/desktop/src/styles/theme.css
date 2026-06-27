@@ -19,6 +19,19 @@
   --display:     "Space Grotesk", system-ui;
 }
 
+[data-theme="light"] {
+  --bg-void:     #f0f0f2;
+  --bg-panel:    #ffffff;
+  --bg-elevated: #e8e8ec;
+  --border-hair: #d0d0d8;
+  --red-core:    #cc0011;
+  --red-glow:    #cc001144;
+  --red-deep:    #8e000b;
+  --ok:          #16a34a;
+  --text-hi:     #111114;
+  --text-lo:     #5a5a66;
+}
+
 * {
   box-sizing: border-box;
 }

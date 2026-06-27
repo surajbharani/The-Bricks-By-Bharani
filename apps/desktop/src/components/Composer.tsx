@@ -3,6 +3,7 @@ import {
 } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSession, type Attachment, type ResponseLength } from '../store/useSession';
+import { useToast } from '../store/useToast';
 import { streamChat, modelSupportsVision, type ContentBlock } from '../lib/proxyClient';
 import { useProjects } from '../store/useProjects';
 import { useMemory } from '../store/useMemory';
@@ -208,6 +209,7 @@ export function Composer() {
 
   const { projects, activeProjectId } = useProjects();
   const { settings: memSettings, facts } = useMemory();
+  const { addToast, removeToast } = useToast();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
 
   const [text, setText]             = useState('');
@@ -232,6 +234,16 @@ export function Composer() {
       : agentMode === 'swarm'
       ? 'Describe a task — your Team will tackle it in parallel…'
       : 'Describe a task — your agent will plan and execute it…';
+
+  // Focus composer on Ctrl+L global shortcut
+  useEffect(() => {
+    const handler = () => {
+      setText('');
+      textareaRef.current?.focus();
+    };
+    window.addEventListener('focus-composer', handler);
+    return () => window.removeEventListener('focus-composer', handler);
+  }, []);
 
   // Show vision warning when image is attached and model doesn't support it
   useEffect(() => {
@@ -376,6 +388,7 @@ export function Composer() {
     abortRef.current = ctrl;
     const asstMsgId = addMessage({ role: 'assistant', content: '', streaming: true });
     setStreaming(true);
+    const thinkingToastIdSWT = addToast({ message: 'AI is thinking…', type: 'info', duration: 0 });
 
     try {
       const gen = streamChat({
@@ -394,11 +407,15 @@ export function Composer() {
     } catch (err) {
       if (err instanceof Error && err.name !== 'AbortError') {
         appendToMessage(asstMsgId, `\n\n*Error: ${err.message}*`);
+        removeToast(thinkingToastIdSWT);
+        addToast({ message: 'Something went wrong. Please try again.', type: 'error', duration: 5000 });
       }
     } finally {
       finalizeMessage(asstMsgId);
       setStreaming(false);
       abortRef.current = null;
+      removeToast(thinkingToastIdSWT);
+      addToast({ message: 'Response ready', type: 'success', duration: 2500 });
     }
   };
 
@@ -464,6 +481,7 @@ export function Composer() {
 
     const asstMsgId = addMessage({ role: 'assistant', content: '', streaming: true });
     setStreaming(true);
+    const thinkingToastId = addToast({ message: 'AI is thinking…', type: 'info', duration: 0 });
 
     // Build system context (global instructions + memory + project)
     const systemParts: string[] = [];
@@ -509,15 +527,16 @@ export function Composer() {
     } catch (err) {
       // Ignore AbortError — user pressed stop intentionally
       if (err instanceof Error && err.name !== 'AbortError') {
-        appendToMessage(
-          asstMsgId,
-          `\n\n*Error: ${err.message}*`
-        );
+        appendToMessage(asstMsgId, `\n\n*Error: ${err.message}*`);
+        removeToast(thinkingToastId);
+        addToast({ message: 'Something went wrong. Please try again.', type: 'error', duration: 5000 });
       }
     } finally {
       finalizeMessage(asstMsgId);
       setStreaming(false);
       abortRef.current = null;
+      removeToast(thinkingToastId);
+      addToast({ message: 'Response ready', type: 'success', duration: 2500 });
     }
   };
 

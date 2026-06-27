@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useSession } from '../store/useSession';
 import { useHistory, type Conversation } from '../store/useHistory';
 import { useAuth } from '../store/useAuth';
@@ -6,7 +6,11 @@ import { useMemory } from '../store/useMemory';
 import { ProjectPanel } from './ProjectPanel';
 import { SettingsModal } from './SettingsModal';
 
-export function Sidebar() {
+interface SidebarProps {
+  onOpenShortcuts?: () => void;
+}
+
+export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
   const { conversationId, newConversation, loadConversation } = useSession();
   const { conversations, agentRuns, deleteConversation, deleteAgentRun, updateConversationMeta } = useHistory();
   const { user, signOut } = useAuth();
@@ -20,6 +24,13 @@ export function Sidebar() {
   const [folderMenuId, setFolderMenuId] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
   const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // Listen for open-settings event from global keyboard shortcut (Ctrl+,)
+  useEffect(() => {
+    const handler = () => setShowSettings(true);
+    window.addEventListener('open-settings', handler);
+    return () => window.removeEventListener('open-settings', handler);
+  }, []);
 
   // Close folder menu on outside click
   React.useEffect(() => {
@@ -312,6 +323,18 @@ export function Sidebar() {
           <div className="flex-1 min-w-0">
             <p className="text-xs text-text-hi truncate">{displayName || user?.email || 'Not signed in'}</p>
           </div>
+          {onOpenShortcuts && (
+            <button
+              onClick={onOpenShortcuts}
+              title="Keyboard shortcuts (Ctrl+K)"
+              className="opacity-0 group-hover:opacity-100 transition-opacity text-text-lo hover:text-text-hi mr-1"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2" />
+                <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10" />
+              </svg>
+            </button>
+          )}
           <button
             onClick={() => setShowSettings(true)}
             title="Settings"
