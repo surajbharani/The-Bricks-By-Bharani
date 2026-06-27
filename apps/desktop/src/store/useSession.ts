@@ -90,7 +90,21 @@ export const useSession = create<SessionState>()(
       setAgentMode: (agentMode) => set({ agentMode }),
       setModel: (model) => set({ model }),
       setActiveProject: (id) => {
+        // Save current conversation before switching projects
+        const s = get();
+        if (s.messages.some((m) => m.role === 'user')) {
+          useHistory.getState().upsertConversation({
+            id: s.conversationId,
+            title: deriveTitle(s.messages),
+            messages: s.messages,
+            model: s.model,
+            projectId: useProjects.getState().activeProjectId ?? undefined,
+            createdAt: s.messages[0]?.timestamp ?? Date.now(),
+            updatedAt: Date.now(),
+          });
+        }
         useProjects.getState().setActiveProject(id);
+        set({ conversationId: makeId(), messages: [], isStreaming: false });
       },
 
       addMessage: (msg) => {
@@ -165,6 +179,7 @@ export const useSession = create<SessionState>()(
             title: deriveTitle(s.messages),
             messages: s.messages,
             model: s.model,
+            projectId: useProjects.getState().activeProjectId ?? undefined,
             createdAt: s.messages[0]?.timestamp ?? Date.now(),
             updatedAt: Date.now(),
           });

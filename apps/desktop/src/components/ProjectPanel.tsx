@@ -4,17 +4,15 @@ import { useSession } from '../store/useSession';
 import { ProjectModal } from './ProjectModal';
 
 export function ProjectPanel() {
-  const { projects, activeProjectId, setActiveProject, deleteProject } = useProjects();
-  const { newConversation } = useSession();
+  const { projects, activeProjectId, deleteProject } = useProjects();
+  const { setActiveProject: sessionSetActiveProject } = useSession();
   const [showModal, setShowModal] = useState(false);
   // Store only the id so the modal always receives a live project object from the store
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const editingProject = editingProjectId ? (projects.find((p) => p.id === editingProjectId) ?? null) : null;
 
-  const activate = (id: string | null) => {
-    setActiveProject(id);
-    newConversation();
-  };
+  // useSession.setActiveProject saves current chat, switches project, and starts a new conversation
+  const activate = (id: string | null) => sessionSetActiveProject(id);
 
   return (
     <>
