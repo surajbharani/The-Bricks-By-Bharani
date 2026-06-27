@@ -11,7 +11,7 @@ const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in windo
 
 export function AgentComposer() {
   const { agentMode, model } = useSession();
-  const { status, startRun, applyEvent, resetRun } = useRun();
+  const { status, startRun, applyEvent, resetRun, agentHistory, appendAgentHistory } = useRun();
   const { session } = useAuth();
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -30,6 +30,12 @@ export function AgentComposer() {
     if (!trimmed || isRunning) return;
     setText('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
+
+    // Build context from previous turns so the agent remembers the conversation
+    const contextPrefix = agentHistory.length > 0
+      ? agentHistory.map((h) => `User: ${h.query}\nAssistant: ${h.response}`).join('\n\n') + '\n\n'
+      : '';
+    const queryWithContext = contextPrefix ? `${contextPrefix}User: ${trimmed}` : trimmed;
 
     startRun(trimmed);
 
@@ -56,10 +62,14 @@ export function AgentComposer() {
     const jwt = session?.access_token ?? '';
     const openrouterKey = (import.meta.env.VITE_OPENROUTER_KEY as string | undefined) ?? '';
 
+    let capturedResponse = '';
+
     // Listen for agent-event Tauri events
     const unlisten = await listen<string>('agent-event', (ev) => {
       try {
         const parsed: AgentEvent = JSON.parse(ev.payload);
+        if (parsed.t === 'token') capturedResponse += parsed.text;
+        if (parsed.t === 'done') capturedResponse = parsed.summary || capturedResponse;
         applyEvent(parsed);
       } catch {
         // ignore malformed lines
@@ -70,15 +80,16 @@ export function AgentComposer() {
     try {
       await invoke('agent_run', {
         request: {
-          query: trimmed,
+          query: queryWithContext,
           mode: agentMode,
           model,
           workspace: null,
           token: jwt,
           openrouter_key: openrouterKey,
-          caps: { max_steps: 20, max_concurrency: 4, max_inr: 5.0 },
+          caps: { max_steps: 20, max_concurrency: 4, max_inr: 50.0 },
         },
       });
+      appendAgentHistory(trimmed, capturedResponse.slice(0, 2000));
     } catch (err) {
       applyEvent({ t: 'error', message: `Failed to start agent: ${err}` });
     } finally {

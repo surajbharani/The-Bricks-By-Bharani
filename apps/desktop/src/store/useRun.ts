@@ -28,6 +28,11 @@ export interface FileActivity {
 
 export type RunStatus = 'idle' | 'planning' | 'running' | 'done' | 'error';
 
+export interface AgentHistoryItem {
+  query: string;
+  response: string;
+}
+
 interface RunState {
   status: RunStatus;
   query: string;
@@ -43,12 +48,17 @@ interface RunState {
   summary: string;
   errorMsg: string;
 
+  // Persistent within the session — survives individual run resets
+  agentHistory: AgentHistoryItem[];
+
   startRun: (query: string) => void;
   applyEvent: (event: AgentEvent) => void;
   resetRun: () => void;
+  appendAgentHistory: (query: string, response: string) => void;
+  clearAgentHistory: () => void;
 }
 
-const INITIAL: Omit<RunState, 'startRun' | 'applyEvent' | 'resetRun'> = {
+const INITIAL: Omit<RunState, 'startRun' | 'applyEvent' | 'resetRun' | 'appendAgentHistory' | 'clearAgentHistory' | 'agentHistory'> = {
   status: 'idle',
   query: '',
   plan: [],
@@ -66,11 +76,17 @@ const INITIAL: Omit<RunState, 'startRun' | 'applyEvent' | 'resetRun'> = {
 
 export const useRun = create<RunState>((set) => ({
   ...INITIAL,
+  agentHistory: [],
 
   startRun: (query) =>
-    set({ ...INITIAL, status: 'planning', query, tokenStream: '' }),
+    set((s) => ({ ...INITIAL, agentHistory: s.agentHistory, status: 'planning', query, tokenStream: '' })),
 
-  resetRun: () => set({ ...INITIAL }),
+  resetRun: () => set((s) => ({ ...INITIAL, agentHistory: s.agentHistory })),
+
+  appendAgentHistory: (query, response) =>
+    set((s) => ({ agentHistory: [...s.agentHistory.slice(-9), { query, response }] })),
+
+  clearAgentHistory: () => set({ agentHistory: [] }),
 
   applyEvent: (event) =>
     set((s) => {
