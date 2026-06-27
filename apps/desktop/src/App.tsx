@@ -16,6 +16,7 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { ToastContainer } from './components/ToastContainer';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { OnboardingFlow } from './components/OnboardingFlow';
+import { SchedulerTicker } from './components/SchedulerTicker';
 import { useAuth } from './store/useAuth';
 import { useSession } from './store/useSession';
 import { useRun } from './store/useRun';
@@ -210,6 +211,7 @@ function App() {
 
       {/* Global overlays */}
       <ToastContainer />
+      <SchedulerTicker />
       <KeyboardShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
     </>
   );

@@ -6,6 +6,8 @@ import { useMemory } from '../store/useMemory';
 import { useTheme } from '../store/useTheme';
 import { ProjectPanel } from './ProjectPanel';
 import { SettingsModal } from './SettingsModal';
+import { ToolMarketplace } from './ToolMarketplace';
+import { SchedulerModal } from './SchedulerModal';
 
 interface SidebarProps {
   onOpenShortcuts?: () => void;
@@ -19,6 +21,8 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
   const { sidebarWidth } = useTheme();
   const isCollapsed = sidebarWidth === 'collapsed';
   const [showSettings, setShowSettings] = useState(false);
+  const [showTools, setShowTools] = useState(false);
+  const [showScheduler, setShowScheduler] = useState(false);
   const [search, setSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -331,6 +335,25 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
 
       {/* Footer */}
       <div className={`border-t border-border-hair ${isCollapsed ? 'px-1.5 py-3' : 'px-3 py-3'}`}>
+        {/* Tools + Scheduled quick actions */}
+        <div className={`flex flex-col gap-0.5 mb-2 ${isCollapsed ? 'items-center' : ''}`}>
+          <button
+            onClick={() => setShowTools(true)}
+            title="Tools"
+            className={`flex items-center gap-2.5 rounded-lg text-text-lo hover:text-text-hi hover:bg-bg-elevated transition-colors ${isCollapsed ? 'justify-center w-8 h-8' : 'px-2 py-1.5 w-full'}`}
+          >
+            <WrenchIcon />
+            {!isCollapsed && <span className="text-xs">Tools</span>}
+          </button>
+          <button
+            onClick={() => setShowScheduler(true)}
+            title="Scheduled"
+            className={`flex items-center gap-2.5 rounded-lg text-text-lo hover:text-text-hi hover:bg-bg-elevated transition-colors ${isCollapsed ? 'justify-center w-8 h-8' : 'px-2 py-1.5 w-full'}`}
+          >
+            <ClockIcon />
+            {!isCollapsed && <span className="text-xs">Scheduled</span>}
+          </button>
+        </div>
         <div className={`flex items-center gap-2 rounded-lg group ${isCollapsed ? 'justify-center px-1 py-1.5' : 'px-2 py-1.5'}`}>
           <div className="w-6 h-6 rounded-full bg-bg-elevated border border-border-hair flex items-center justify-center text-[10px] text-text-hi font-bold flex-shrink-0">
             {avatarLabel}
@@ -370,7 +393,26 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
       </div>
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      <ToolMarketplace open={showTools} onClose={() => setShowTools(false)} />
+      <SchedulerModal open={showScheduler} onClose={() => setShowScheduler(false)} />
     </aside>
+  );
+}
+
+function WrenchIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+    </svg>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
   );
 }
 
