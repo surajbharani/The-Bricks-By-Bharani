@@ -7,12 +7,24 @@ import { useProjects } from './useProjects';
 export type AppMode = 'chat' | 'agent';
 export type AgentMode = 'solo' | 'swarm';
 
+export interface WebSource {
+  title: string;
+  snippet: string;
+  url: string;
+  domain: string;
+}
+
 export interface Attachment {
-  type: 'image' | 'file' | 'search' | 'youtube';
-  name: string;
+  type: 'image' | 'image-gen' | 'image-upload' | 'file' | 'search' | 'youtube' | 'web-search';
+  name?: string;
   dataUrl?: string;
   text?: string;
   mimeType?: string;
+  url?: string;
+  prompt?: string;
+  webStatus?: 'searching' | 'reading' | 'answering' | 'done';
+  query?: string;
+  sources?: WebSource[];
 }
 
 export interface Message {
@@ -63,6 +75,7 @@ interface SessionState {
   addMessage: (msg: Omit<Message, 'id' | 'timestamp'>) => string;
   appendToMessage: (id: string, text: string) => void;
   appendReasoning: (id: string, text: string) => void;
+  updateMessage: (id: string, updates: Partial<Omit<Message, 'id'>>) => void;
   finalizeMessage: (id: string) => void;
   setFeedback: (id: string, feedback: 'like' | 'dislike') => void;
   addBranch: (id: string, text: string) => void;
@@ -144,6 +157,13 @@ export const useSession = create<SessionState>()(
         set((s) => ({
           messages: s.messages.map((m) =>
             m.id === id ? { ...m, reasoning: (m.reasoning ?? '') + text } : m
+          ),
+        })),
+
+      updateMessage: (id, updates) =>
+        set((s) => ({
+          messages: s.messages.map((m) =>
+            m.id === id ? { ...m, ...updates } : m
           ),
         })),
 

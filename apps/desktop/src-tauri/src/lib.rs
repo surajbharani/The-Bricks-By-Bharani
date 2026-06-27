@@ -74,6 +74,63 @@ async fn agent_run(app: AppHandle, request: AgentRunRequest) -> Result<(), Strin
 #[tauri::command]
 fn agent_stop() {}
 
+#[tauri::command]
+fn run_code(lang: String, code: String) -> Result<String, String> {
+    use std::io::Write as _;
+    use std::process::{Command, Stdio};
+
+    let ext = match lang.as_str() {
+        "python" | "py" => "py",
+        "javascript" | "js" | "node" => "js",
+        "bash" | "sh" => "sh",
+        _ => return Err(format!("Unsupported language: {lang}")),
+    };
+
+    let tmp_path = std::env::temp_dir().join(format!("nb_run_{}.{}", std::process::id(), ext));
+    {
+        let mut f = std::fs::File::create(&tmp_path).map_err(|e| e.to_string())?;
+        f.write_all(code.as_bytes()).map_err(|e| e.to_string())?;
+    }
+
+    let program = match ext {
+        "py" => "python3",
+        "js" => "node",
+        _    => "bash",
+    };
+
+    let mut child = Command::new(program)
+        .arg(&tmp_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to run {program}: {e}"))?;
+
+    // Wait with timeout via a separate thread
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = child.wait_with_output();
+        let _ = tx.send(result);
+    });
+
+    let output = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .map_err(|_| "Timed out after 10 seconds".to_string())?
+        .map_err(|e| e.to_string())?;
+
+    let _ = std::fs::remove_file(&tmp_path);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{}{}", stdout, stderr);
+    let truncated = if combined.len() > 4000 {
+        format!("{}…(truncated)", &combined[..4000])
+    } else {
+        combined
+    };
+
+    Ok(truncated)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -90,7 +147,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![agent_run, agent_stop])
+        .invoke_handler(tauri::generate_handler![agent_run, agent_stop, run_code])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

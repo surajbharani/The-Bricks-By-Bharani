@@ -49,8 +49,16 @@ html, body, #root {
 
 /* Dot-grid background pattern */
 .dot-grid {
-  background-image: radial-gradient(circle, #ffffff08 1px, transparent 1px);
+  background-image: radial-gradient(circle, var(--dot-color, #ffffff08) 1px, transparent 1px);
   background-size: 24px 24px;
+}
+
+:root {
+  --dot-color: #ffffff08;
+}
+
+[data-theme="light"] {
+  --dot-color: #00000010;
 }
 
 /* Scrollbar styling */

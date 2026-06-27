@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useSession, type Message, type ThinkingConfig } from '../store/useSession';
+import { useSession, type Message, type ThinkingConfig, type Attachment, type WebSource } from '../store/useSession';
 import { CoTSection } from './CoTSection';
 import { CodeBlock } from './CodeBlock';
 
@@ -120,16 +120,29 @@ function MessageBubble({ msg, thinking, isLastAssistant, isStreaming, onFeedback
       )}
 
       <div className="max-w-[78%] flex flex-col gap-1.5">
-        {/* Image attachments */}
-        {msg.attachments?.filter((a) => a.type === 'image' && a.dataUrl).map((att, i) => (
+        {/* Web search block (Perplexity-style) */}
+        {msg.attachments?.find((a) => a.type === 'web-search') && (
+          <WebSearchBlock att={msg.attachments.find((a) => a.type === 'web-search')!} message={msg} />
+        )}
+
+        {/* Generated images */}
+        {msg.attachments?.filter((a) => a.type === 'image-gen').map((att, i) => (
+          <div key={i} className="rounded-xl overflow-hidden border border-border-hair">
+            <img src={att.url} alt={att.prompt} className="w-full max-w-sm object-cover" />
+            <p className="px-3 py-1.5 text-[10px] text-text-lo bg-bg-panel">{att.prompt}</p>
+          </div>
+        ))}
+
+        {/* Uploaded image attachments */}
+        {msg.attachments?.filter((a) => (a.type === 'image' || a.type === 'image-upload') && a.dataUrl).map((att, i) => (
           <img key={i} src={att.dataUrl} alt={att.name}
             className="rounded-xl max-w-[260px] max-h-[200px] object-cover border border-border-hair" />
         ))}
 
         {/* File / search badges */}
-        {msg.attachments?.filter((a) => a.type !== 'image').length ? (
+        {msg.attachments?.filter((a) => a.type !== 'image' && a.type !== 'image-upload' && a.type !== 'image-gen' && a.type !== 'web-search').length ? (
           <div className="flex flex-wrap gap-1.5">
-            {msg.attachments.filter((a) => a.type !== 'image').map((att, i) => (
+            {msg.attachments.filter((a) => a.type !== 'image' && a.type !== 'image-upload' && a.type !== 'image-gen' && a.type !== 'web-search').map((att, i) => (
               <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-bg-panel border border-border-hair rounded-full text-xs text-text-lo">
                 {att.type === 'file' ? '📄' : att.type === 'search' ? '🔍' : '▶'}
                 {att.name}
@@ -322,5 +335,78 @@ function SpeakerIcon({ speaking }: { speaking: boolean }) {
       <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
       <path d="M15.54 8.46a5 5 0 010 7.07" />
     </svg>
+  );
+}
+
+// ── Web Search Block (Perplexity-style) ───────────────────────────────────────
+function WebSearchBlock({ att }: { att: Attachment; message: Message }) {
+  const status = att.webStatus ?? 'searching';
+  const sources = att.sources ?? [];
+  const query = att.query ?? '';
+
+  const steps = [
+    { id: 'searching', label: 'Searching the web', icon: '🔍' },
+    { id: 'reading',   label: 'Reading sources',   icon: '📖' },
+    { id: 'answering', label: 'Generating answer',  icon: '✨' },
+  ];
+  const stepOrder = ['searching', 'reading', 'answering', 'done'];
+  const currentIdx = stepOrder.indexOf(status);
+
+  return (
+    <div className="flex flex-col gap-3 w-full">
+      <div className="flex flex-col gap-1.5 px-4 py-3 rounded-xl bg-bg-panel border border-border-hair">
+        <p className="text-[10px] text-text-lo uppercase tracking-wide font-mono mb-1">🔍 Web search — {query}</p>
+        {steps.map((step) => {
+          const stepIdx = stepOrder.indexOf(step.id);
+          const isDone = currentIdx > stepIdx || status === 'done';
+          const isActive = stepOrder[currentIdx] === step.id && status !== 'done';
+          return (
+            <div key={step.id} className="flex items-center gap-2">
+              <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                {isDone ? (
+                  <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} className="text-ok text-xs">✓</motion.span>
+                ) : isActive ? (
+                  <motion.span animate={{ opacity: [1, 0.3, 1] }} transition={{ duration: 1, repeat: Infinity }} className="w-2 h-2 rounded-full bg-red-core block" />
+                ) : (
+                  <span className="w-2 h-2 rounded-full bg-border-hair block" />
+                )}
+              </div>
+              <span className={`text-xs ${isDone ? 'text-text-lo line-through' : isActive ? 'text-text-hi font-medium' : 'text-text-lo opacity-40'}`}>
+                {step.icon} {step.label}
+              </span>
+              {isActive && (
+                <motion.span animate={{ opacity: [1, 0, 1] }} transition={{ duration: 0.8, repeat: Infinity }} className="text-[10px] text-red-core">…</motion.span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <AnimatePresence>
+        {sources.length > 0 && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="overflow-hidden">
+            <p className="text-[10px] text-text-lo uppercase tracking-wide font-mono mb-1.5 px-1">Sources</p>
+            <div className="flex flex-wrap gap-2">
+              {sources.map((src, idx) => <SourceChip key={idx} source={src} index={idx + 1} />)}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function SourceChip({ source, index }: { source: WebSource; index: number }) {
+  return (
+    <motion.a
+      href={source.url} target="_blank" rel="noopener noreferrer"
+      initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: index * 0.05 }}
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-bg-elevated border border-border-hair hover:border-red-core/40 transition-colors group max-w-[200px]"
+      title={source.title}
+    >
+      <img src={`https://www.google.com/s2/favicons?domain=${source.domain}&sz=16`} alt="" className="w-3.5 h-3.5 rounded-sm flex-shrink-0"
+        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+      <span className="text-[10px] text-text-lo group-hover:text-text-hi truncate">[{index}] {source.domain}</span>
+    </motion.a>
   );
 }
