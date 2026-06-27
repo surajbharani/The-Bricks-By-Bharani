@@ -2,7 +2,7 @@ import {
   useState, useRef, useEffect, useCallback, type KeyboardEvent,
 } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useSession, type Attachment, type ResponseLength, type WebSource } from '../store/useSession';
+import { useSession, type Attachment, type WebSource } from '../store/useSession';
 import { useToast } from '../store/useToast';
 import { streamChat, modelSupportsVision, type ContentBlock } from '../lib/proxyClient';
 import { useProjects } from '../store/useProjects';
@@ -190,23 +190,8 @@ export function Composer() {
     mode, agentMode, model,
     messages,
     addMessage, appendToMessage, appendReasoning, updateMessage, finalizeMessage, setStreaming, isStreaming,
-    responseLength, setResponseLength,
     regeneratePayload, setRegeneratePayload,
   } = useSession();
-
-  const [showLengthMenu, setShowLengthMenu] = useState(false);
-  const lengthMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!showLengthMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (lengthMenuRef.current && !lengthMenuRef.current.contains(e.target as Node)) {
-        setShowLengthMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showLengthMenu]);
 
   const { projects, activeProjectId } = useProjects();
   const { settings: memSettings, facts } = useMemory();
@@ -372,12 +357,6 @@ export function Composer() {
     }
 
     const systemParts: string[] = [];
-    const lengthHint: Record<string, string> = {
-      short: 'Keep your response brief and concise (1–3 short paragraphs or less).',
-      medium: 'Give a moderately detailed response (3–6 paragraphs).',
-      long: 'Give a thorough, comprehensive response with full detail.',
-    };
-    if (lengthHint[responseLength]) systemParts.push(lengthHint[responseLength]);
     if (memSettings.globalSystemPrompt) systemParts.push(memSettings.globalSystemPrompt);
     if (memSettings.memoryEnabled && facts.length) {
       systemParts.push(`[What I remember about you]\n${facts.map((f) => `- ${f.text}`).join('\n')}`);
@@ -566,12 +545,6 @@ export function Composer() {
 
     // Build system context (global instructions + memory + project)
     const systemParts: string[] = [];
-    const lengthHint: Record<string, string> = {
-      short: 'Keep your response brief and concise (1–3 short paragraphs or less).',
-      medium: 'Give a moderately detailed response (3–6 paragraphs).',
-      long: 'Give a thorough, comprehensive response with full detail.',
-    };
-    if (lengthHint[responseLength]) systemParts.push(lengthHint[responseLength]);
     if (memSettings.globalSystemPrompt) systemParts.push(memSettings.globalSystemPrompt);
     if (memSettings.memoryEnabled && facts.length) {
       systemParts.push(`[What I remember about you]\n${facts.map((f) => `- ${f.text}`).join('\n')}`);
@@ -878,32 +851,8 @@ export function Composer() {
               )}
             </div>
 
-            {/* Right: length pill + send / stop button */}
+            {/* Right: send / stop button */}
             <div className="flex items-center gap-1.5">
-              {/* Response length pill */}
-              <div className="relative" ref={lengthMenuRef}>
-                <button
-                  onClick={() => setShowLengthMenu((v) => !v)}
-                  className="flex items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-medium text-text-lo hover:text-text-hi border border-border-hair hover:border-red-core/30 transition-colors"
-                >
-                  {responseLength === 'auto' ? 'Auto' : responseLength.charAt(0).toUpperCase() + responseLength.slice(1)}
-                  <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M4 5.5L1 2.5h6L4 5.5z"/></svg>
-                </button>
-                {showLengthMenu && (
-                  <div className="absolute bottom-full mb-1 right-0 bg-bg-panel border border-border-hair rounded-xl overflow-hidden shadow-xl z-20 min-w-[90px]">
-                    {(['auto', 'short', 'medium', 'long'] as ResponseLength[]).map((opt) => (
-                      <button
-                        key={opt}
-                        onClick={() => { setResponseLength(opt); setShowLengthMenu(false); }}
-                        className={`w-full text-left px-3 py-1.5 text-[11px] transition-colors ${responseLength === opt ? 'text-red-core bg-red-core/10' : 'text-text-lo hover:text-text-hi hover:bg-bg-elevated'}`}
-                      >
-                        {opt.charAt(0).toUpperCase() + opt.slice(1)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
             <motion.button
               onClick={isStreaming ? stopStreaming : send}
               disabled={!isStreaming && !canSend}
@@ -922,7 +871,6 @@ export function Composer() {
 
         <p className="text-center text-xs text-text-lo mt-2 opacity-50">
           Enter to send · Shift+Enter for new line
-          {(googleOn || youtubeOn) && ' · Search ON'}
           {isListening && ' · 🎤 Listening…'}
         </p>
       </div>
