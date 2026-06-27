@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import type { AgentEvent } from '@nano-bricks/shared';
 
 export interface RunStep {
@@ -74,7 +75,9 @@ const INITIAL: Omit<RunState, 'startRun' | 'applyEvent' | 'resetRun' | 'appendAg
   errorMsg: '',
 };
 
-export const useRun = create<RunState>((set) => ({
+export const useRun = create<RunState>()(
+  persist(
+    (set) => ({
   ...INITIAL,
   agentHistory: [],
 
@@ -84,9 +87,9 @@ export const useRun = create<RunState>((set) => ({
   resetRun: () => set((s) => ({ ...INITIAL, agentHistory: s.agentHistory })),
 
   appendAgentHistory: (query, response) =>
-    set((s) => ({ agentHistory: [...s.agentHistory.slice(-9), { query, response }] })),
+    set((s) => ({ agentHistory: [...s.agentHistory, { query, response }] })),
 
-  clearAgentHistory: () => set({ agentHistory: [] }),
+  clearAgentHistory: () => set({ ...INITIAL, agentHistory: [] }),
 
   applyEvent: (event) =>
     set((s) => {
@@ -151,13 +154,32 @@ export const useRun = create<RunState>((set) => ({
             status: 'done',
             summary: event.summary,
             tokensUsed: event.tokensUsed,
+            // Persist this turn so the conversation thread survives further runs / reloads
+            agentHistory: [
+              ...s.agentHistory,
+              { query: s.query, response: event.summary || s.tokenStream },
+            ],
           };
 
         case 'error':
-          return { status: 'error', errorMsg: event.message };
+          return {
+            status: 'error',
+            errorMsg: event.message,
+            agentHistory: [
+              ...s.agentHistory,
+              { query: s.query, response: `⚠️ ${event.message}` },
+            ],
+          };
 
         default:
           return {};
       }
     }),
-}));
+    }),
+    {
+      name: 'nano-bricks-run',
+      // Only persist the conversation thread — transient run state stays in memory
+      partialize: (s) => ({ agentHistory: s.agentHistory }),
+    }
+  )
+);

@@ -11,7 +11,7 @@ const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in windo
 
 export function AgentComposer() {
   const { agentMode, model } = useSession();
-  const { status, startRun, applyEvent, resetRun, agentHistory, appendAgentHistory } = useRun();
+  const { status, startRun, applyEvent, resetRun, agentHistory } = useRun();
   const { session } = useAuth();
   const [text, setText] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -31,9 +31,10 @@ export function AgentComposer() {
     setText('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
-    // Build context from previous turns so the agent remembers the conversation
-    const contextPrefix = agentHistory.length > 0
-      ? agentHistory.map((h) => `User: ${h.query}\nAssistant: ${h.response}`).join('\n\n') + '\n\n'
+    // Build context from the most recent turns so the agent remembers the conversation
+    const recentHistory = agentHistory.slice(-8);
+    const contextPrefix = recentHistory.length > 0
+      ? recentHistory.map((h) => `User: ${h.query}\nAssistant: ${h.response}`).join('\n\n') + '\n\n'
       : '';
     const queryWithContext = contextPrefix ? `${contextPrefix}User: ${trimmed}` : trimmed;
 
@@ -62,14 +63,11 @@ export function AgentComposer() {
     const jwt = session?.access_token ?? '';
     const openrouterKey = (import.meta.env.VITE_OPENROUTER_KEY as string | undefined) ?? '';
 
-    let capturedResponse = '';
-
-    // Listen for agent-event Tauri events
+    // Listen for agent-event Tauri events. The completed turn is appended to
+    // agentHistory atomically inside applyEvent() on the 'done'/'error' event.
     const unlisten = await listen<string>('agent-event', (ev) => {
       try {
         const parsed: AgentEvent = JSON.parse(ev.payload);
-        if (parsed.t === 'token') capturedResponse += parsed.text;
-        if (parsed.t === 'done') capturedResponse = parsed.summary || capturedResponse;
         applyEvent(parsed);
       } catch {
         // ignore malformed lines
@@ -89,7 +87,6 @@ export function AgentComposer() {
           caps: { max_steps: 20, max_concurrency: 4, max_inr: 50.0 },
         },
       });
-      appendAgentHistory(trimmed, capturedResponse.slice(0, 2000));
     } catch (err) {
       applyEvent({ t: 'error', message: `Failed to start agent: ${err}` });
     } finally {

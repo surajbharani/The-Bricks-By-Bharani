@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { DEFAULT_MODEL } from '@nano-bricks/shared';
 import { useHistory } from './useHistory';
 import { useProjects } from './useProjects';
+import { useRun } from './useRun';
 
 export type AppMode = 'chat' | 'agent';
 export type AgentMode = 'solo' | 'swarm';
@@ -256,6 +257,8 @@ export const useSession = create<SessionState>()(
             updatedAt: Date.now(),
           });
         }
+        // Reset the agent conversation thread too, so "New conversation" starts fresh in both modes
+        useRun.getState().clearAgentHistory();
         set({ conversationId: makeId(), messages: [], isStreaming: false });
       },
 

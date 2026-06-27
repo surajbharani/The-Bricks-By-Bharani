@@ -10,7 +10,7 @@ import { WorkspaceTree } from './WorkspaceTree';
 import { SummaryChip } from './SummaryChip';
 
 export function RunView() {
-  const { status, query, plan, thinking, steps, subagents, tokenStream, files, summary, errorMsg, tokensUsed, inr } =
+  const { status, query, plan, thinking, steps, subagents, tokenStream, files, summary, errorMsg, tokensUsed, inr, agentHistory } =
     useRun();
   const { agentMode, model } = useSession();
   const { saveAgentRun } = useHistory();
@@ -38,7 +38,8 @@ export function RunView() {
     }
   }, [status, query, summary, errorMsg, tokensUsed, model, saveAgentRun]);
 
-  if (status === 'idle') {
+  // Empty state — only when there is no active run AND no past conversation
+  if (status === 'idle' && agentHistory.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center p-8">
         <div className="w-16 h-16 rounded-2xl bg-bg-elevated border border-border-hair flex items-center justify-center">
@@ -57,9 +58,30 @@ export function RunView() {
   }
 
   const isActive = status === 'planning' || status === 'running';
+  const showLiveCard = status !== 'idle';
+  // The current run is already the last item in agentHistory once it's done/error,
+  // so trim it from the completed-thread list to avoid showing it twice.
+  const completedTurns =
+    (status === 'done' || status === 'error') ? agentHistory.slice(0, -1) : agentHistory;
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-0">
+      {/* Past conversation turns */}
+      {completedTurns.map((turn, idx) => (
+        <div key={`turn-${idx}`} className="mb-4">
+          <div className="flex justify-end mb-2">
+            <div className="max-w-[75%] px-4 py-2.5 rounded-xl bg-red-core/15 border border-red-core/25">
+              <p className="text-sm text-text-hi whitespace-pre-wrap">{turn.query}</p>
+            </div>
+          </div>
+          <div className="p-4 rounded-xl bg-bg-panel border border-border-hair">
+            <p className="text-sm text-text-hi whitespace-pre-wrap leading-relaxed">{turn.response}</p>
+          </div>
+        </div>
+      ))}
+
+      {showLiveCard && (
+      <>
       {/* Query bubble */}
       <motion.div
         initial={{ opacity: 0, y: 8 }}
@@ -149,6 +171,8 @@ export function RunView() {
           <SummaryChip ok={false} summary={errorMsg} tokensUsed={tokensUsed} inr={inr} />
         )}
       </motion.div>
+      </>
+      )}
     </div>
   );
 }
