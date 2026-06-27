@@ -5,9 +5,13 @@ const PROXY_URL = import.meta.env.VITE_PROXY_URL || 'https://api.nanobricks.app'
 const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_KEY as string | undefined;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 export interface ChatRequest {
   model: string;
-  messages: { role: string; content: string }[];
+  messages: { role: string; content: string | ContentBlock[] }[];
 }
 
 async function getJwt(): Promise<string | null> {
@@ -15,21 +19,24 @@ async function getJwt(): Promise<string | null> {
   return data.session?.access_token ?? null;
 }
 
-// Strip leading "openrouter/" prefix that OpenRouter itself doesn't expect
 function normalizeModel(model: string): string {
   return model.startsWith('openrouter/') ? model.slice('openrouter/'.length) : model;
 }
 
+function extractText(content: string | ContentBlock[]): string {
+  if (typeof content === 'string') return content;
+  const block = content.find((b) => b.type === 'text');
+  return block?.type === 'text' ? block.text : '';
+}
+
 export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
-  // Dev-only stub (local `pnpm dev`)
   if (import.meta.env.DEV && !import.meta.env.VITE_USE_REAL_PROXY) {
-    yield* stubStream(req.messages.at(-1)?.content ?? '');
+    yield* stubStream(extractText(req.messages.at(-1)?.content ?? ''));
     return;
   }
 
   const isDev = useAuth.getState().isDev;
 
-  // Dev bypass session: use OpenRouter if key is embedded, else stub
   if (isDev) {
     if (OPENROUTER_KEY) {
       yield* streamOpenRouter(req);
@@ -39,13 +46,11 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
     return;
   }
 
-  // Direct OpenRouter path for openrouter/* models when key is embedded
   if (OPENROUTER_KEY && req.model.startsWith('openrouter/')) {
     yield* streamOpenRouter(req);
     return;
   }
 
-  // Proxy path (requires real Supabase JWT)
   const token = await getJwt();
   if (!token) throw new Error('You need to sign in before sending messages.');
 
@@ -55,11 +60,7 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({
-      model: req.model,
-      messages: req.messages,
-      stream: true,
-    }),
+    body: JSON.stringify({ model: req.model, messages: req.messages, stream: true }),
   });
 
   if (!res.ok) {
@@ -67,31 +68,7 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
     throw new Error(err.error ?? `Proxy error ${res.status}`);
   }
 
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-
-    const lines = buf.split('\n');
-    buf = lines.pop() ?? '';
-
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6).trim();
-      if (data === '[DONE]') return;
-      try {
-        const chunk = JSON.parse(data);
-        const text = chunk.choices?.[0]?.delta?.content;
-        if (text) yield text;
-      } catch {
-        // skip malformed chunks
-      }
-    }
-  }
+  yield* readSSEStream(res);
 }
 
 async function* streamOpenRouter(req: ChatRequest): AsyncGenerator<string> {
@@ -115,6 +92,10 @@ async function* streamOpenRouter(req: ChatRequest): AsyncGenerator<string> {
     throw new Error(err.error?.message ?? `OpenRouter error ${res.status}`);
   }
 
+  yield* readSSEStream(res);
+}
+
+async function* readSSEStream(res: Response): AsyncGenerator<string> {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buf = '';
@@ -133,7 +114,7 @@ async function* streamOpenRouter(req: ChatRequest): AsyncGenerator<string> {
         const chunk = JSON.parse(data);
         const text = chunk.choices?.[0]?.delta?.content;
         if (text) yield text;
-      } catch { /* skip malformed */ }
+      } catch { /* skip malformed chunks */ }
     }
   }
 }
@@ -145,11 +126,7 @@ async function* stubStream(prompt: string): AsyncGenerator<string> {
     `Switch to **Agent mode** to watch me plan, execute, and verify tasks step by step — ` +
     `or use **Team mode** to run parallel sub-agents for faster results.\n\n` +
     `*(This is a preview stub — connect the proxy to get real AI responses.)*`;
-
-  for (const char of reply) {
-    yield char;
-    await delay(18);
-  }
+  for (const char of reply) { yield char; await delay(18); }
 }
 
 async function* devStub(): AsyncGenerator<string> {
@@ -160,11 +137,7 @@ async function* devStub(): AsyncGenerator<string> {
     `2. Re-trigger the Windows build from GitHub Actions\n` +
     `3. Install the new build\n\n` +
     `Everything else in the app works normally.`;
-
-  for (const char of reply) {
-    yield char;
-    await delay(12);
-  }
+  for (const char of reply) { yield char; await delay(12); }
 }
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
