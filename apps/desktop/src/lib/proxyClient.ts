@@ -21,11 +21,10 @@ export interface ChatRequest {
 
 // Models that support vision/image input
 export const VISION_MODELS = new Set([
-  'openrouter/owl-alpha',
   'openai/gpt-4o',
   'openai/gpt-4o-mini',
   'anthropic/claude-3-5-sonnet',
-  'google/gemini-pro-vision',
+  'openrouter/google/gemini-2.0-flash-exp:free',
 ]);
 
 export function modelSupportsVision(model: string): boolean {
