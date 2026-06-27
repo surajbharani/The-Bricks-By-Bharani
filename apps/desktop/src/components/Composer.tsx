@@ -3,20 +3,20 @@ import {
 } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSession, type Attachment } from '../store/useSession';
-import { streamChat, type ContentBlock } from '../lib/proxyClient';
+import { streamChat, modelSupportsVision, type ContentBlock } from '../lib/proxyClient';
 import {
   googleSearch, youtubeSearch,
   formatSearchContext, formatYouTubeContext,
   hasGoogleSearch, hasYouTubeSearch,
 } from '../lib/search';
 
-// ── PDF / DOCX extraction (lazy-loaded) ───────────────────────────────────────
+// Static ?url import so Vite bundles the worker file and rewrites the path correctly
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+// ── PDF / DOCX / CSV extraction ───────────────────────────────────────────────
 async function extractPdf(file: File): Promise<string> {
   const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist');
-  GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url,
-  ).toString();
+  GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
   const buf = await file.arrayBuffer();
   const pdf = await getDocument({ data: buf }).promise;
   const parts: string[] = [];
@@ -29,24 +29,20 @@ async function extractPdf(file: File): Promise<string> {
 }
 
 async function extractDocx(file: File): Promise<string> {
-  const mammoth = await import('mammoth');
+  // Vite wraps CJS packages — default export lives at .default
+  const mod = await import('mammoth');
+  const mammoth = (mod.default ?? mod) as { extractRawText: (o: { arrayBuffer: ArrayBuffer }) => Promise<{ value: string }> };
   const buf = await file.arrayBuffer();
   const result = await mammoth.extractRawText({ arrayBuffer: buf });
   return result.value;
 }
 
-function parseCSV(text: string): string {
-  return text.slice(0, 8000); // pass raw CSV, truncate at 8K chars
-}
-
 async function extractFileText(file: File): Promise<string> {
   const name = file.name.toLowerCase();
-  if (name.endsWith('.pdf')) return extractPdf(file);
+  if (name.endsWith('.pdf'))  return extractPdf(file);
   if (name.endsWith('.docx')) return extractDocx(file);
-  if (name.endsWith('.csv') || name.endsWith('.txt')) {
-    return parseCSV(await file.text());
-  }
-  return file.text();
+  // CSV / TXT — pass raw text, capped at 8 000 chars
+  return (await file.text()).slice(0, 8000);
 }
 
 // ── Camera modal ──────────────────────────────────────────────────────────────
@@ -57,10 +53,10 @@ function CameraModal({
   onCapture: (dataUrl: string) => void;
   onClose: () => void;
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef  = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const [tab, setTab] = useState<'camera' | 'screen'>('camera');
+  const [tab, setTab]   = useState<'camera' | 'screen'>('camera');
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
 
@@ -97,10 +93,10 @@ function CameraModal({
   };
 
   const capture = () => {
-    const video = videoRef.current;
+    const video  = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
-    canvas.width = video.videoWidth;
+    canvas.width  = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d')!.drawImage(video, 0, 0);
     const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
@@ -109,7 +105,10 @@ function CameraModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+      onClick={onClose}
+    >
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -136,7 +135,10 @@ function CameraModal({
         </div>
 
         {/* Preview */}
-        <div className="relative bg-black rounded-xl overflow-hidden" style={{ aspectRatio: '16/9' }}>
+        <div
+          className="relative bg-black rounded-xl overflow-hidden"
+          style={{ aspectRatio: '16/9' }}
+        >
           <video ref={videoRef} muted playsInline className="w-full h-full object-contain" />
           {!ready && !error && (
             <div className="absolute inset-0 flex items-center justify-center text-text-lo text-xs">
@@ -157,7 +159,10 @@ function CameraModal({
             onClick={capture}
             disabled={!ready}
             className="flex-1 py-2 rounded-xl text-sm font-semibold text-white transition-colors duration-150"
-            style={{ background: ready ? 'linear-gradient(135deg,#FF1F2E,#8E0E16)' : '#26262B', cursor: ready ? 'pointer' : 'not-allowed' }}
+            style={{
+              background: ready ? 'linear-gradient(135deg,#FF1F2E,#8E0E16)' : '#26262B',
+              cursor: ready ? 'pointer' : 'not-allowed',
+            }}
           >
             Capture
           </button>
@@ -175,22 +180,26 @@ function CameraModal({
 
 // ── Main Composer ─────────────────────────────────────────────────────────────
 export function Composer() {
-  const { mode, agentMode, model, addMessage, appendToMessage, finalizeMessage, setStreaming, isStreaming } =
-    useSession();
+  const {
+    mode, agentMode, model,
+    addMessage, appendToMessage, finalizeMessage, setStreaming, isStreaming,
+  } = useSession();
 
-  const [text, setText] = useState('');
+  const [text, setText]             = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isListening, setIsListening] = useState(false);
-  const [googleOn, setGoogleOn] = useState(false);
-  const [youtubeOn, setYoutubeOn] = useState(false);
+  const [googleOn, setGoogleOn]     = useState(false);
+  const [youtubeOn, setYoutubeOn]   = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  const [visionWarn, setVisionWarn] = useState(false);
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textareaRef  = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef  = useRef<HTMLInputElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
+  const abortRef       = useRef<AbortController | null>(null);
 
   const placeholder =
     mode === 'chat'
@@ -199,11 +208,20 @@ export function Composer() {
       ? 'Describe a task — your Team will tackle it in parallel…'
       : 'Describe a task — your agent will plan and execute it…';
 
+  // Show vision warning when image is attached and model doesn't support it
+  useEffect(() => {
+    const hasImage = attachments.some((a) => a.type === 'image');
+    setVisionWarn(hasImage && !modelSupportsVision(model));
+  }, [attachments, model]);
+
   // ── Voice Input ─────────────────────────────────────────────────────────────
   const toggleVoice = () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { alert('Speech recognition is not available in this environment.'); return; }
+    if (!SR) {
+      alert('Speech recognition is not available in this environment.');
+      return;
+    }
 
     if (isListening) {
       recognitionRef.current?.stop();
@@ -212,16 +230,17 @@ export function Composer() {
     }
 
     const rec = new SR();
-    rec.continuous = false;
-    rec.interimResults = true;
-    rec.lang = 'en-US';
-    rec.onresult = (e: Event & { results: SpeechRecognitionResultList }) => {
-      const transcript = Array.from(e.results)
+    rec.continuous      = false;
+    rec.interimResults  = true;
+    rec.lang            = 'en-US';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rec.onresult = (e: any) => {
+      const transcript = Array.from(e.results as SpeechRecognitionResultList)
         .map((r) => r[0].transcript)
         .join('');
       setText(transcript);
     };
-    rec.onend = () => setIsListening(false);
+    rec.onend   = () => setIsListening(false);
     rec.onerror = () => setIsListening(false);
     recognitionRef.current = rec;
     rec.start();
@@ -249,7 +268,7 @@ export function Composer() {
         { type: 'file', name: file.name, text: extracted },
       ]);
     } catch {
-      alert(`Could not read ${file.name}. Try a different file.`);
+      alert(`Could not read "${file.name}". Try a different file.`);
     }
   };
 
@@ -262,52 +281,60 @@ export function Composer() {
     setShowCamera(false);
   };
 
+  // ── Stop streaming ───────────────────────────────────────────────────────────
+  const stopStreaming = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+  };
+
   // ── Send ────────────────────────────────────────────────────────────────────
   const send = async () => {
     const trimmed = text.trim();
     if ((!trimmed && attachments.length === 0) || isStreaming) return;
+
+    // Snapshot attachments before clearing state
+    const snap = [...attachments];
     setText('');
     setAttachments([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
-    // Build context prefix from search
+    // Build context prefix from search results
     let contextPrefix = '';
     if ((googleOn || youtubeOn) && trimmed) {
       setIsSearching(true);
       const [gResults, ytResults] = await Promise.all([
-        googleOn ? googleSearch(trimmed) : Promise.resolve([]),
+        googleOn  ? googleSearch(trimmed)  : Promise.resolve([]),
         youtubeOn ? youtubeSearch(trimmed) : Promise.resolve([]),
       ]);
       setIsSearching(false);
-      if (gResults.length) contextPrefix += formatSearchContext(gResults, trimmed);
+      if (gResults.length)  contextPrefix += formatSearchContext(gResults, trimmed);
       if (ytResults.length) contextPrefix += formatYouTubeContext(ytResults, trimmed);
     }
 
-    // Build file context prefix
-    const fileAttachments = attachments.filter((a) => a.type === 'file');
-    for (const fa of fileAttachments) {
+    // Build file context prefix from snapshotted attachments
+    for (const fa of snap.filter((a) => a.type === 'file')) {
       contextPrefix += `[File: ${fa.name}]\n${(fa.text ?? '').slice(0, 6000)}\n---\n\n`;
     }
 
-    // Build search/youtube attachment records for display
-    const displayAttachments: Attachment[] = [...attachments];
-    if (googleOn && trimmed) displayAttachments.push({ type: 'search', name: 'Google Search' });
+    // Attachment badges shown in the chat bubble
+    const displayAttachments: Attachment[] = [...snap];
+    if (googleOn  && trimmed) displayAttachments.push({ type: 'search',  name: 'Google Search' });
     if (youtubeOn && trimmed) displayAttachments.push({ type: 'youtube', name: 'YouTube Search' });
 
-    // Add user message to store (for display)
+    // Add user message to store for display
     addMessage({
       role: 'user',
       content: trimmed,
       attachments: displayAttachments.length ? displayAttachments : undefined,
     });
 
-    // Build API message content
-    const imageAttachments = attachments.filter((a) => a.type === 'image' && a.dataUrl);
-    const fullText = contextPrefix + (trimmed || '(see attached file)');
+    // Build API content — multimodal when images present
+    const imageSnap = snap.filter((a) => a.type === 'image' && a.dataUrl);
+    const fullText  = contextPrefix + (trimmed || '(see attached image)');
 
     let apiContent: string | ContentBlock[];
-    if (imageAttachments.length > 0) {
-      const blocks: ContentBlock[] = imageAttachments.map((img) => ({
+    if (imageSnap.length > 0) {
+      const blocks: ContentBlock[] = imageSnap.map((img) => ({
         type: 'image_url' as const,
         image_url: { url: img.dataUrl! },
       }));
@@ -317,25 +344,31 @@ export function Composer() {
       apiContent = fullText;
     }
 
+    // Create abort controller for this request
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
     const asstMsgId = addMessage({ role: 'assistant', content: '', streaming: true });
     setStreaming(true);
 
     try {
-      const gen = streamChat({
-        model,
-        messages: [{ role: 'user', content: apiContent }],
-      });
+      const gen = streamChat({ model, messages: [{ role: 'user', content: apiContent }], signal: ctrl.signal });
       for await (const chunk of gen) {
+        if (ctrl.signal.aborted) break;
         appendToMessage(asstMsgId, chunk);
       }
     } catch (err) {
-      appendToMessage(
-        asstMsgId,
-        `\n\n*Something went wrong: ${err instanceof Error ? err.message : 'Unknown error'}*`
-      );
+      // Ignore AbortError — user pressed stop intentionally
+      if (err instanceof Error && err.name !== 'AbortError') {
+        appendToMessage(
+          asstMsgId,
+          `\n\n*Error: ${err.message}*`
+        );
+      }
     } finally {
       finalizeMessage(asstMsgId);
       setStreaming(false);
+      abortRef.current = null;
     }
   };
 
@@ -380,6 +413,20 @@ export function Composer() {
       />
 
       <div className="px-4 pb-4">
+        {/* Vision warning */}
+        <AnimatePresence>
+          {visionWarn && (
+            <motion.p
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="text-xs text-amber-400 mb-1.5 px-1"
+            >
+              ⚠ Current model may not support images. Switch to Owl Alpha or GPT-4o for vision.
+            </motion.p>
+          )}
+        </AnimatePresence>
+
         <div className="bg-bg-elevated border border-border-hair rounded-xl focus-within:border-red-core/40 focus-within:shadow-red-glow transition-all duration-200">
 
           {/* Attachment previews */}
@@ -400,7 +447,9 @@ export function Composer() {
                       <img src={att.dataUrl} alt={att.name} className="h-14 w-14 object-cover" />
                     ) : (
                       <div className="px-2 py-1 flex items-center gap-1.5">
-                        <span className="text-base">{att.type === 'file' ? '📄' : att.type === 'search' ? '🔍' : '▶'}</span>
+                        <span className="text-base">
+                          {att.type === 'file' ? '📄' : att.type === 'search' ? '🔍' : '▶'}
+                        </span>
                         <span className="text-xs text-text-lo max-w-[120px] truncate">{att.name}</span>
                       </div>
                     )}
@@ -434,70 +483,62 @@ export function Composer() {
 
           {/* Toolbar row */}
           <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
-            {/* Left: input buttons */}
+            {/* Left: tool buttons */}
             <div className="flex items-center gap-1">
-              {/* Mic */}
               <ToolBtn
-                title={isListening ? 'Stop listening' : 'Voice input'}
+                title={isListening ? 'Stop listening' : 'Voice input (mic)'}
                 active={isListening}
                 onClick={toggleVoice}
               >
                 <MicIcon listening={isListening} />
               </ToolBtn>
 
-              {/* Image upload */}
               <ToolBtn title="Upload image" onClick={() => imageInputRef.current?.click()}>
                 <ImageIcon />
               </ToolBtn>
 
-              {/* File upload */}
               <ToolBtn title="Upload file (PDF, DOCX, CSV)" onClick={() => fileInputRef.current?.click()}>
                 <FileIcon />
               </ToolBtn>
 
-              {/* Camera */}
               <ToolBtn title="Camera / screenshot" onClick={() => setShowCamera(true)}>
                 <CameraIcon />
               </ToolBtn>
 
-              {/* Divider */}
               <div className="w-px h-4 bg-border-hair mx-1" />
 
-              {/* Google Search toggle */}
               <ToolBtn
-                title={hasGoogleSearch ? 'Google Search' : 'Google Search (API key not set)'}
+                title={hasGoogleSearch ? 'Google Search (click to toggle)' : 'Google Search — add GOOGLE_SEARCH_KEY secret to enable'}
                 active={googleOn}
-                onClick={() => hasGoogleSearch && setGoogleOn((v) => !v)}
+                onClick={() => { if (hasGoogleSearch) setGoogleOn((v) => !v); }}
                 dim={!hasGoogleSearch}
               >
                 <GoogleIcon />
               </ToolBtn>
 
-              {/* YouTube Search toggle */}
               <ToolBtn
-                title={hasYouTubeSearch ? 'YouTube Search' : 'YouTube Search (API key not set)'}
+                title={hasYouTubeSearch ? 'YouTube Search (click to toggle)' : 'YouTube Search — add YOUTUBE_KEY secret to enable'}
                 active={youtubeOn}
-                onClick={() => hasYouTubeSearch && setYoutubeOn((v) => !v)}
+                onClick={() => { if (hasYouTubeSearch) setYoutubeOn((v) => !v); }}
                 dim={!hasYouTubeSearch}
               >
                 <YouTubeIcon />
               </ToolBtn>
 
-              {/* Searching indicator */}
               {isSearching && (
                 <span className="text-xs text-text-lo animate-pulse ml-1">Searching…</span>
               )}
             </div>
 
-            {/* Right: send button */}
+            {/* Right: send / stop button */}
             <motion.button
-              onClick={isStreaming ? undefined : send}
-              disabled={!canSend}
+              onClick={isStreaming ? stopStreaming : send}
+              disabled={!isStreaming && !canSend}
               whileTap={{ scale: 0.92 }}
               className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-150 flex-shrink-0"
               style={{
-                background: canSend ? '#FF1F2E' : '#26262B',
-                cursor: canSend ? 'pointer' : 'not-allowed',
+                background: isStreaming ? '#FF1F2E' : canSend ? '#FF1F2E' : '#26262B',
+                cursor: (isStreaming || canSend) ? 'pointer' : 'not-allowed',
               }}
             >
               {isStreaming ? <StopIcon /> : <SendIcon />}
@@ -515,7 +556,7 @@ export function Composer() {
   );
 }
 
-// ── Small toolbar button ───────────────────────────────────────────────────────
+// ── Small toolbar button ──────────────────────────────────────────────────────
 function ToolBtn({
   children, onClick, title, active = false, dim = false,
 }: {
@@ -536,7 +577,9 @@ function ToolBtn({
         color: active ? '#FF1F2E' : 'var(--text-lo)',
       }}
       onMouseEnter={(e) => { if (!dim) (e.currentTarget as HTMLButtonElement).style.color = 'var(--text-hi)'; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = active ? '#FF1F2E' : 'var(--text-lo)'; }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.color = active ? '#FF1F2E' : 'var(--text-lo)';
+      }}
     >
       {children}
     </button>
@@ -546,7 +589,8 @@ function ToolBtn({
 // ── Icons ─────────────────────────────────────────────────────────────────────
 function MicIcon({ listening }: { listening: boolean }) {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={listening ? '#FF1F2E' : 'currentColor'} strokeWidth="2" strokeLinecap="round">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke={listening ? '#FF1F2E' : 'currentColor'} strokeWidth="2" strokeLinecap="round">
       <rect x="9" y="2" width="6" height="12" rx="3" />
       <path d="M5 10a7 7 0 0014 0" />
       <line x1="12" y1="19" x2="12" y2="22" />
@@ -554,20 +598,20 @@ function MicIcon({ listening }: { listening: boolean }) {
     </svg>
   );
 }
-
 function ImageIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <circle cx="8.5" cy="8.5" r="1.5" />
       <polyline points="21 15 16 10 5 21" />
     </svg>
   );
 }
-
 function FileIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
       <polyline points="14 2 14 8 20 8" />
       <line x1="8" y1="13" x2="16" y2="13" />
@@ -575,16 +619,15 @@ function FileIcon() {
     </svg>
   );
 }
-
 function CameraIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round">
       <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" />
       <circle cx="12" cy="13" r="4" />
     </svg>
   );
 }
-
 function GoogleIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
@@ -595,7 +638,6 @@ function GoogleIcon() {
     </svg>
   );
 }
-
 function YouTubeIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -603,7 +645,6 @@ function YouTubeIcon() {
     </svg>
   );
 }
-
 function SendIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -611,7 +652,6 @@ function SendIcon() {
     </svg>
   );
 }
-
 function StopIcon() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" fill="none">

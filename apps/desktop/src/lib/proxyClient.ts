@@ -12,6 +12,20 @@ export type ContentBlock =
 export interface ChatRequest {
   model: string;
   messages: { role: string; content: string | ContentBlock[] }[];
+  signal?: AbortSignal;
+}
+
+// Models that support vision/image input
+export const VISION_MODELS = new Set([
+  'openrouter/owl-alpha',
+  'openai/gpt-4o',
+  'openai/gpt-4o-mini',
+  'anthropic/claude-3-5-sonnet',
+  'google/gemini-pro-vision',
+]);
+
+export function modelSupportsVision(model: string): boolean {
+  return VISION_MODELS.has(model) || model.startsWith('openrouter/');
 }
 
 async function getJwt(): Promise<string | null> {
@@ -30,6 +44,8 @@ function extractText(content: string | ContentBlock[]): string {
 }
 
 export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
+  const { signal } = req;
+
   if (import.meta.env.DEV && !import.meta.env.VITE_USE_REAL_PROXY) {
     yield* stubStream(extractText(req.messages.at(-1)?.content ?? ''));
     return;
@@ -39,7 +55,7 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
 
   if (isDev) {
     if (OPENROUTER_KEY) {
-      yield* streamOpenRouter(req);
+      yield* streamOpenRouter(req, signal);
     } else {
       yield* devStub();
     }
@@ -47,7 +63,7 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
   }
 
   if (OPENROUTER_KEY && req.model.startsWith('openrouter/')) {
-    yield* streamOpenRouter(req);
+    yield* streamOpenRouter(req, signal);
     return;
   }
 
@@ -56,6 +72,7 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
 
   const res = await fetch(`${PROXY_URL}/v1/chat`, {
     method: 'POST',
+    signal,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
@@ -68,12 +85,13 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<string> {
     throw new Error(err.error ?? `Proxy error ${res.status}`);
   }
 
-  yield* readSSEStream(res);
+  yield* readSSEStream(res, signal);
 }
 
-async function* streamOpenRouter(req: ChatRequest): AsyncGenerator<string> {
+async function* streamOpenRouter(req: ChatRequest, signal?: AbortSignal): AsyncGenerator<string> {
   const res = await fetch(OPENROUTER_URL, {
     method: 'POST',
+    signal,
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${OPENROUTER_KEY}`,
@@ -92,30 +110,35 @@ async function* streamOpenRouter(req: ChatRequest): AsyncGenerator<string> {
     throw new Error(err.error?.message ?? `OpenRouter error ${res.status}`);
   }
 
-  yield* readSSEStream(res);
+  yield* readSSEStream(res, signal);
 }
 
-async function* readSSEStream(res: Response): AsyncGenerator<string> {
+async function* readSSEStream(res: Response, signal?: AbortSignal): AsyncGenerator<string> {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buf = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    buf = lines.pop() ?? '';
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6).trim();
-      if (data === '[DONE]') return;
-      try {
-        const chunk = JSON.parse(data);
-        const text = chunk.choices?.[0]?.delta?.content;
-        if (text) yield text;
-      } catch { /* skip malformed chunks */ }
+  try {
+    while (true) {
+      if (signal?.aborted) break;
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') return;
+        try {
+          const chunk = JSON.parse(data);
+          const text = chunk.choices?.[0]?.delta?.content;
+          if (text) yield text;
+        } catch { /* skip malformed chunks */ }
+      }
     }
+  } finally {
+    reader.cancel().catch(() => {});
   }
 }
 
