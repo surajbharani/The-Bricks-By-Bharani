@@ -3,16 +3,45 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useSession, type Message, type ThinkingConfig, type Attachment, type WebSource } from '../store/useSession';
+import { useTheme } from '../store/useTheme';
 import { CoTSection } from './CoTSection';
 import { CodeBlock } from './CodeBlock';
 
+function playPing() {
+  try {
+    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.4);
+  } catch {
+    // ignore audio errors silently
+  }
+}
+
 export function ChatStream() {
   const { messages, thinking, setFeedback, setBranchIndex, regenerate, editAndResend, isStreaming } = useSession();
+  const { notificationSound } = useTheme();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const prevStreamingRef = useRef(isStreaming);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    if (prevStreamingRef.current && !isStreaming && notificationSound) {
+      const last = messages[messages.length - 1];
+      if (last?.role === 'assistant') playPing();
+    }
+    prevStreamingRef.current = isStreaming;
+  }, [isStreaming, messages, notificationSound]);
 
   if (messages.length === 0) {
     return (

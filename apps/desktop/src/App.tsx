@@ -33,7 +33,7 @@ function App() {
   const { mode, showCanvas, setShowCanvas, newConversation } = useSession();
   const { resetRun } = useRun();
   const { projects, activeProjectId } = useProjects();
-  const { theme } = useTheme();
+  const { theme, fontSize, fontStyle, bubbleDensity, messageWidth, sidebarWidth } = useTheme();
   const { completed } = useOnboarding();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
 
@@ -43,6 +43,30 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Apply appearance CSS variables
+  useEffect(() => {
+    const root = document.documentElement;
+    const sizeMap = { small: '12px', medium: '14px', large: '16px' };
+    const familyMap = {
+      system: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      serif:  "Georgia, 'Times New Roman', serif",
+      mono:   "'JetBrains Mono', Menlo, Consolas, monospace",
+      rounded: "'Nunito', 'Varela Round', sans-serif",
+    };
+    const pxMap = { compact: '0.75rem', comfortable: '1rem', spacious: '1.25rem' };
+    const pyMap = { compact: '0.5rem',  comfortable: '0.75rem', spacious: '1rem' };
+    const mwMap = { narrow: '60%', medium: '75%', wide: '90%' };
+
+    root.style.setProperty('--chat-font-size',   sizeMap[fontSize]);
+    root.style.setProperty('--chat-font-family', familyMap[fontStyle]);
+    root.style.setProperty('--bubble-px',        pxMap[bubbleDensity]);
+    root.style.setProperty('--bubble-py',        pyMap[bubbleDensity]);
+    root.style.setProperty('--msg-max-w',        mwMap[messageWidth]);
+
+    const swMap = { collapsed: '48px', normal: '224px', wide: '280px' };
+    root.style.setProperty('--sidebar-w', swMap[sidebarWidth]);
+  }, [fontSize, fontStyle, bubbleDensity, messageWidth, sidebarWidth]);
 
   // Handle confirmation deep-link: nano-bricks://auth/callback#access_token=...
   useEffect(() => {

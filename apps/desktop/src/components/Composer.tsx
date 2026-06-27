@@ -8,6 +8,7 @@ import { streamChat, modelSupportsVision, type ContentBlock } from '../lib/proxy
 import { useProjects } from '../store/useProjects';
 import { useMemory } from '../store/useMemory';
 import { useTools } from '../store/useTools';
+import { useTheme } from '../store/useTheme';
 import { searchWeb, formatResultsAsContext } from '../lib/webSearch';
 import { generateImage, IMAGE_MODELS, type ImageModel } from '../lib/imageGen';
 
@@ -197,6 +198,7 @@ export function Composer() {
   const { settings: memSettings, facts } = useMemory();
   const { addToast, removeToast } = useToast();
   const { isEnabled } = useTools();
+  const { sendKey } = useTheme();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
 
   const [text, setText]             = useState('');
@@ -599,7 +601,11 @@ export function Composer() {
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    if (sendKey === 'enter') {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    } else {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); }
+    }
   };
 
   const onInput = () => {
@@ -716,8 +722,8 @@ export function Composer() {
               placeholder={placeholder}
               rows={1}
               disabled={isStreaming}
-              className="w-full resize-none bg-transparent text-sm text-text-hi placeholder-text-lo outline-none leading-relaxed"
-              style={{ fontFamily: 'var(--display)', maxHeight: '160px' }}
+              className="w-full resize-none bg-transparent text-text-hi placeholder-text-lo outline-none leading-relaxed"
+              style={{ fontFamily: 'var(--display)', maxHeight: '160px', fontSize: 'var(--chat-font-size, 14px)' }}
             />
           </div>
 

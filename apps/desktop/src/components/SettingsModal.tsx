@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useMemory } from '../store/useMemory';
 import { useAuth } from '../store/useAuth';
+import { useTheme, type FontSize, type FontStyle, type BubbleDensity, type MessageWidth, type SidebarWidth, type SendKey } from '../store/useTheme';
 
 interface Props {
   onClose: () => void;
@@ -9,8 +10,9 @@ interface Props {
 export function SettingsModal({ onClose }: Props) {
   const { settings, facts, updateSettings, addFact, updateFact, deleteFact, clearAllFacts } = useMemory();
   const { user } = useAuth();
+  const { fontSize, fontStyle, bubbleDensity, messageWidth, sidebarWidth, sendKey, notificationSound, setFontSize, setFontStyle, setBubbleDensity, setMessageWidth, setSidebarWidth, setSendKey, setNotificationSound } = useTheme();
 
-  const [tab, setTab] = useState<'profile' | 'memory' | 'instructions'>('profile');
+  const [tab, setTab] = useState<'profile' | 'memory' | 'instructions' | 'appearance'>('profile');
   const [displayName, setDisplayName] = useState(settings.displayName);
   const [globalPrompt, setGlobalPrompt] = useState(settings.globalSystemPrompt);
   const [memoryEnabled, setMemoryEnabled] = useState(settings.memoryEnabled);
@@ -45,9 +47,10 @@ export function SettingsModal({ onClose }: Props) {
   const avatar = (displayName || user?.email || '?')[0]?.toUpperCase();
 
   const TABS = [
-    { key: 'profile', label: 'Profile' },
-    { key: 'memory', label: `Memory${facts.length ? ` (${facts.length})` : ''}` },
+    { key: 'profile',     label: 'Profile' },
+    { key: 'memory',      label: `Memory${facts.length ? ` (${facts.length})` : ''}` },
     { key: 'instructions', label: 'Instructions' },
+    { key: 'appearance',  label: 'Appearance' },
   ] as const;
 
   return (
@@ -192,6 +195,53 @@ export function SettingsModal({ onClose }: Props) {
             </>
           )}
 
+          {tab === 'appearance' && (
+            <div className="space-y-5">
+              <AppearanceGroup label="Font Size" description="Base size for chat text, labels and input">
+                {([['small','Small'], ['medium','Medium'], ['large','Large']] as [FontSize, string][]).map(([v, l]) => (
+                  <SegBtn key={v} active={fontSize === v} onClick={() => setFontSize(v)}>{l}</SegBtn>
+                ))}
+              </AppearanceGroup>
+              <AppearanceGroup label="Font Style" description="Applies to chat bubbles only, not UI chrome">
+                {([['system','System'], ['serif','Serif'], ['mono','Mono'], ['rounded','Rounded']] as [FontStyle, string][]).map(([v, l]) => (
+                  <SegBtn key={v} active={fontStyle === v} onClick={() => setFontStyle(v)}>{l}</SegBtn>
+                ))}
+              </AppearanceGroup>
+              <AppearanceGroup label="Bubble Density" description="Padding inside each chat bubble">
+                {([['compact','Compact'], ['comfortable','Comfortable'], ['spacious','Spacious']] as [BubbleDensity, string][]).map(([v, l]) => (
+                  <SegBtn key={v} active={bubbleDensity === v} onClick={() => setBubbleDensity(v)}>{l}</SegBtn>
+                ))}
+              </AppearanceGroup>
+              <AppearanceGroup label="Message Width" description="Max width of message bubbles">
+                {([['narrow','Narrow'], ['medium','Medium'], ['wide','Wide']] as [MessageWidth, string][]).map(([v, l]) => (
+                  <SegBtn key={v} active={messageWidth === v} onClick={() => setMessageWidth(v)}>{l}</SegBtn>
+                ))}
+              </AppearanceGroup>
+              <AppearanceGroup label="Sidebar Width" description="Width of the left conversation panel">
+                {([['collapsed','Collapsed'], ['normal','Normal'], ['wide','Wide']] as [SidebarWidth, string][]).map(([v, l]) => (
+                  <SegBtn key={v} active={sidebarWidth === v} onClick={() => setSidebarWidth(v)}>{l}</SegBtn>
+                ))}
+              </AppearanceGroup>
+              <AppearanceGroup label="Send Key" description="How to send messages in the chat composer">
+                {([['enter','Enter = Send'], ['ctrl-enter','Ctrl+Enter = Send']] as [SendKey, string][]).map(([v, l]) => (
+                  <SegBtn key={v} active={sendKey === v} onClick={() => setSendKey(v)}>{l}</SegBtn>
+                ))}
+              </AppearanceGroup>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-text-hi font-medium">Notification sound</p>
+                  <p className="text-[10px] text-text-lo mt-0.5">Play a subtle ping when AI finishes responding</p>
+                </div>
+                <button
+                  onClick={() => setNotificationSound(!notificationSound)}
+                  className={`w-10 h-5 rounded-full relative transition-colors ${notificationSound ? 'bg-red-core' : 'bg-bg-elevated border border-border-hair'}`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${notificationSound ? 'left-5' : 'left-0.5'}`} />
+                </button>
+              </div>
+            </div>
+          )}
+
           {tab === 'instructions' && (
             <>
               <div>
@@ -229,5 +279,31 @@ export function SettingsModal({ onClose }: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+function AppearanceGroup({ label, description, children }: { label: string; description: string; children: ReactNode }) {
+  return (
+    <div>
+      <p className="text-xs text-text-hi font-medium mb-0.5">{label}</p>
+      <p className="text-[10px] text-text-lo mb-2">{description}</p>
+      <div className="flex flex-wrap gap-1.5">{children}</div>
+    </div>
+  );
+}
+
+function SegBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all border"
+      style={{
+        background: active ? 'linear-gradient(135deg,#FF1F2E,#8E0E16)' : 'var(--bg-elevated)',
+        color: active ? '#fff' : 'var(--text-lo)',
+        borderColor: active ? 'transparent' : 'var(--border-hair)',
+      }}
+    >
+      {children}
+    </button>
   );
 }
