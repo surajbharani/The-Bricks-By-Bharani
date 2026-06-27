@@ -337,6 +337,7 @@ export function Composer() {
               <button
                 onClick={() => setPlusOpen((v) => !v)}
                 title="Attach or choose a tool"
+                aria-label="Open tools menu"
                 className="w-8 h-8 rounded-lg flex items-center justify-center border transition-all duration-150"
                 style={{
                   borderColor: plusOpen ? 'var(--red-core)' : 'var(--border-hair)',
