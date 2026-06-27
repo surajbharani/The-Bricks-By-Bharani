@@ -54,6 +54,7 @@ export function AgentComposer() {
     }
 
     const jwt = session?.access_token ?? '';
+    const openrouterKey = (import.meta.env.VITE_OPENROUTER_KEY as string | undefined) ?? '';
 
     // Listen for agent-event Tauri events
     const unlisten = await listen<string>('agent-event', (ev) => {
@@ -74,6 +75,7 @@ export function AgentComposer() {
           model,
           workspace: null,
           token: jwt,
+          openrouter_key: openrouterKey,
           caps: { max_steps: 20, max_concurrency: 4, max_inr: 5.0 },
         },
       });

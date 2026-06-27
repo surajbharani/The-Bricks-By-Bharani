@@ -45,26 +45,36 @@ def main() -> None:
         _emit_error(f"Failed to read request: {e}")
         return
 
-    query     = req.get("query", "").strip()
-    mode      = req.get("mode", "solo")
-    model     = req.get("model", "deepseek/deepseek-chat-v4-flash")
-    workspace = Path(req.get("workspace", str(Path.home() / "Documents" / "Nano Bricks")))
-    jwt       = req.get("token", "")
-    caps      = req.get("caps", {})
+    query          = req.get("query", "").strip()
+    mode           = req.get("mode", "solo")
+    model          = req.get("model", "deepseek/deepseek-chat-v4-flash")
+    workspace      = Path(req.get("workspace", str(Path.home() / "Documents" / "Nano Bricks")))
+    jwt            = req.get("token", "")
+    openrouter_key = req.get("openrouter_key", "")
+    caps           = req.get("caps", {})
 
     if not query:
         _emit_error("Query is empty. Please provide a task.")
         return
 
-    if not jwt:
+    # Determine if we should use OpenRouter directly
+    use_openrouter = bool(openrouter_key) and (
+        model.startswith("openrouter/") or not jwt or jwt == "dev-token"
+    )
+
+    if not use_openrouter and not jwt:
         _emit_error("No auth token provided. Please sign in to Nano Bricks.")
         return
 
     # Default workspace: Documents/Nano Bricks
     workspace.mkdir(parents=True, exist_ok=True)
 
-    from providers.proxy import make_client
-    client = make_client(jwt)
+    from providers.proxy import make_client, make_openrouter_client, normalize_model
+    if use_openrouter:
+        client = make_openrouter_client(openrouter_key)
+        model = normalize_model(model)
+    else:
+        client = make_client(jwt)
 
     if mode == "swarm":
         _run_swarm(query, model, workspace, jwt, client, caps)
