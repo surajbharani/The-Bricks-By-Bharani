@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useSession } from '../store/useSession';
+import { useSession, type Message } from '../store/useSession';
+import { CodeRunner } from './CodeRunner';
 
 export function ChatStream() {
   const { messages } = useSession();
@@ -51,15 +52,31 @@ export function ChatStream() {
               </div>
             )}
 
-            <div
-              className={`max-w-[75%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                msg.role === 'user'
-                  ? 'bg-bg-elevated border border-border-hair text-text-hi rounded-br-sm'
-                  : 'bg-bg-panel border border-border-hair text-text-hi rounded-bl-sm'
-              }`}
-            >
-              <span className="whitespace-pre-wrap break-words">{msg.content}</span>
-              {msg.streaming && <span className="caret" />}
+            <div className={`max-w-[75%] flex flex-col gap-2`}>
+              {/* Image attachments */}
+              {msg.attachments?.map((att, i) => (
+                <div key={i} className="rounded-xl overflow-hidden border border-border-hair">
+                  <img src={att.url} alt={att.prompt} className="w-full max-w-sm object-cover" />
+                  <p className="px-3 py-1.5 text-[10px] text-text-lo bg-bg-panel">{att.prompt}</p>
+                </div>
+              ))}
+
+              {/* Text content */}
+              {msg.content && (
+                <div
+                  className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                    msg.role === 'user'
+                      ? 'bg-bg-elevated border border-border-hair text-text-hi rounded-br-sm'
+                      : 'bg-bg-panel border border-border-hair text-text-hi rounded-bl-sm'
+                  }`}
+                >
+                  {msg.role === 'assistant'
+                    ? <AssistantContent message={msg} />
+                    : <span className="whitespace-pre-wrap break-words">{msg.content}</span>
+                  }
+                  {msg.streaming && <span className="caret" />}
+                </div>
+              )}
             </div>
           </motion.div>
         ))}
@@ -67,6 +84,54 @@ export function ChatStream() {
       <div ref={bottomRef} />
     </div>
   );
+}
+
+// Parse and render assistant content, with CodeRunner for fenced code blocks
+function AssistantContent({ message }: { message: Message }) {
+  const parts = parseCodeBlocks(message.content);
+
+  return (
+    <div className="whitespace-pre-wrap break-words">
+      {parts.map((part, i) => {
+        if (part.type === 'text') {
+          return <span key={i}>{part.content}</span>;
+        }
+        return (
+          <div key={i} className="my-2">
+            <pre className="bg-bg-void rounded-lg px-4 py-3 text-xs font-mono overflow-x-auto border border-border-hair">
+              <code>{part.content}</code>
+            </pre>
+            <CodeRunner lang={part.lang} code={part.content} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+interface TextPart { type: 'text'; content: string }
+interface CodePart { type: 'code'; lang: string; content: string }
+type Part = TextPart | CodePart;
+
+function parseCodeBlocks(text: string): Part[] {
+  const parts: Part[] = [];
+  const regex = /```(\w*)\n?([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ type: 'text', content: text.slice(lastIndex, match.index) });
+    }
+    parts.push({ type: 'code', lang: match[1] || 'text', content: match[2].trimEnd() });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push({ type: 'text', content: text.slice(lastIndex) });
+  }
+
+  return parts;
 }
 
 const STARTERS = ['Summarize a document', 'Write code', 'Research a topic'];

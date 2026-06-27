@@ -5,12 +5,19 @@ import { DEFAULT_MODEL } from '@nano-bricks/shared';
 export type AppMode = 'chat' | 'agent';
 export type AgentMode = 'solo' | 'swarm';
 
+export interface Attachment {
+  type: 'image';
+  url: string;
+  prompt: string;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   streaming?: boolean;
   timestamp: number;
+  attachments?: Attachment[];
 }
 
 interface SessionState {

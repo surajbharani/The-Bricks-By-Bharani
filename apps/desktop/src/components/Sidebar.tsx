@@ -3,9 +3,11 @@ import { useAuth } from '../store/useAuth';
 
 interface SidebarProps {
   onOpenShortcuts?: () => void;
+  onOpenMarketplace?: () => void;
+  onOpenScheduler?: () => void;
 }
 
-export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
+export function Sidebar({ onOpenShortcuts, onOpenMarketplace, onOpenScheduler }: SidebarProps = {}) {
   const { messages, clearMessages } = useSession();
   const { user, signOut } = useAuth();
 
@@ -55,6 +57,24 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
 
       {/* Footer */}
       <div className="px-3 py-3 border-t border-border-hair">
+        {onOpenMarketplace && (
+          <button
+            onClick={onOpenMarketplace}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-text-lo hover:text-text-hi hover:bg-bg-elevated transition-colors mb-1"
+          >
+            <span className="text-sm">🔌</span>
+            <span>Tools</span>
+          </button>
+        )}
+        {onOpenScheduler && (
+          <button
+            onClick={onOpenScheduler}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs text-text-lo hover:text-text-hi hover:bg-bg-elevated transition-colors mb-1"
+          >
+            <span className="text-sm">🕐</span>
+            <span>Scheduled</span>
+          </button>
+        )}
         {onOpenShortcuts && (
           <button
             onClick={onOpenShortcuts}

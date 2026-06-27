@@ -14,6 +14,9 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { ToastContainer } from './components/ToastContainer';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { OnboardingFlow } from './components/OnboardingFlow';
+import { ToolMarketplace } from './components/ToolMarketplace';
+import { SchedulerModal } from './components/SchedulerModal';
+import { SchedulerTicker } from './components/SchedulerTicker';
 import { useAuth } from './store/useAuth';
 import { useSession } from './store/useSession';
 import { useRun } from './store/useRun';
@@ -32,6 +35,8 @@ function App() {
   const { theme } = useTheme();
   const { completed } = useOnboarding();
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showMarketplace, setShowMarketplace] = useState(false);
+  const [showScheduler, setShowScheduler] = useState(false);
 
   // Apply theme to document root
   useEffect(() => {
@@ -115,7 +120,11 @@ function App() {
   return (
     <>
       <div className="dot-grid flex h-screen w-screen overflow-hidden bg-bg-void">
-        <Sidebar onOpenShortcuts={() => setShowShortcuts(true)} />
+        <Sidebar
+          onOpenShortcuts={() => setShowShortcuts(true)}
+          onOpenMarketplace={() => setShowMarketplace(true)}
+          onOpenScheduler={() => setShowScheduler(true)}
+        />
 
         <div className="flex flex-col flex-1 min-w-0 h-full">
           {/* Top bar */}
@@ -147,8 +156,11 @@ function App() {
       </div>
 
       {/* Global overlays */}
+      <SchedulerTicker />
       <ToastContainer />
       <KeyboardShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+      <ToolMarketplace open={showMarketplace} onClose={() => setShowMarketplace(false)} />
+      <SchedulerModal open={showScheduler} onClose={() => setShowScheduler(false)} />
     </>
   );
 }
