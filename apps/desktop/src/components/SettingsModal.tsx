@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useMemory } from '../store/useMemory';
 import { useAuth } from '../store/useAuth';
-import { useTheme, type FontSize, type FontStyle, type BubbleDensity, type MessageWidth } from '../store/useTheme';
+import { useTheme, type FontSize, type FontStyle, type BubbleDensity, type MessageWidth, type SidebarWidth, type SendKey } from '../store/useTheme';
 
 interface Props {
   onClose: () => void;
@@ -10,7 +10,7 @@ interface Props {
 export function SettingsModal({ onClose }: Props) {
   const { settings, facts, updateSettings, addFact, updateFact, deleteFact, clearAllFacts } = useMemory();
   const { user } = useAuth();
-  const { fontSize, fontStyle, bubbleDensity, messageWidth, setFontSize, setFontStyle, setBubbleDensity, setMessageWidth } = useTheme();
+  const { fontSize, fontStyle, bubbleDensity, messageWidth, sidebarWidth, sendKey, notificationSound, setFontSize, setFontStyle, setBubbleDensity, setMessageWidth, setSidebarWidth, setSendKey, setNotificationSound } = useTheme();
 
   const [tab, setTab] = useState<'profile' | 'memory' | 'instructions' | 'appearance'>('profile');
   const [displayName, setDisplayName] = useState(settings.displayName);
@@ -217,6 +217,28 @@ export function SettingsModal({ onClose }: Props) {
                   <SegBtn key={v} active={messageWidth === v} onClick={() => setMessageWidth(v)}>{l}</SegBtn>
                 ))}
               </AppearanceGroup>
+              <AppearanceGroup label="Sidebar Width" description="Width of the left conversation panel">
+                {([['collapsed','Collapsed'], ['normal','Normal'], ['wide','Wide']] as [SidebarWidth, string][]).map(([v, l]) => (
+                  <SegBtn key={v} active={sidebarWidth === v} onClick={() => setSidebarWidth(v)}>{l}</SegBtn>
+                ))}
+              </AppearanceGroup>
+              <AppearanceGroup label="Send Key" description="How to send messages in the chat composer">
+                {([['enter','Enter = Send'], ['ctrl-enter','Ctrl+Enter = Send']] as [SendKey, string][]).map(([v, l]) => (
+                  <SegBtn key={v} active={sendKey === v} onClick={() => setSendKey(v)}>{l}</SegBtn>
+                ))}
+              </AppearanceGroup>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-text-hi font-medium">Notification sound</p>
+                  <p className="text-[10px] text-text-lo mt-0.5">Play a subtle ping when AI finishes responding</p>
+                </div>
+                <button
+                  onClick={() => setNotificationSound(!notificationSound)}
+                  className={`w-10 h-5 rounded-full relative transition-colors ${notificationSound ? 'bg-red-core' : 'bg-bg-elevated border border-border-hair'}`}
+                >
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${notificationSound ? 'left-5' : 'left-0.5'}`} />
+                </button>
+              </div>
             </div>
           )}
 

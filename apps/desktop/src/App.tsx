@@ -33,7 +33,7 @@ function App() {
   const { mode, showCanvas, setShowCanvas, newConversation } = useSession();
   const { resetRun } = useRun();
   const { projects, activeProjectId } = useProjects();
-  const { theme, fontSize, fontStyle, bubbleDensity, messageWidth } = useTheme();
+  const { theme, fontSize, fontStyle, bubbleDensity, messageWidth, sidebarWidth } = useTheme();
   const { completed } = useOnboarding();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
 
@@ -63,7 +63,10 @@ function App() {
     root.style.setProperty('--bubble-px',        pxMap[bubbleDensity]);
     root.style.setProperty('--bubble-py',        pyMap[bubbleDensity]);
     root.style.setProperty('--msg-max-w',        mwMap[messageWidth]);
-  }, [fontSize, fontStyle, bubbleDensity, messageWidth]);
+
+    const swMap = { collapsed: '48px', normal: '224px', wide: '280px' };
+    root.style.setProperty('--sidebar-w', swMap[sidebarWidth]);
+  }, [fontSize, fontStyle, bubbleDensity, messageWidth, sidebarWidth]);
 
   // Handle confirmation deep-link: nano-bricks://auth/callback#access_token=...
   useEffect(() => {

@@ -3,6 +3,7 @@ import { useSession } from '../store/useSession';
 import { useHistory, type Conversation } from '../store/useHistory';
 import { useAuth } from '../store/useAuth';
 import { useMemory } from '../store/useMemory';
+import { useTheme } from '../store/useTheme';
 import { ProjectPanel } from './ProjectPanel';
 import { SettingsModal } from './SettingsModal';
 
@@ -15,6 +16,8 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
   const { conversations, agentRuns, deleteConversation, deleteAgentRun, updateConversationMeta } = useHistory();
   const { user, signOut } = useAuth();
   const { settings } = useMemory();
+  const { sidebarWidth } = useTheme();
+  const isCollapsed = sidebarWidth === 'collapsed';
   const [showSettings, setShowSettings] = useState(false);
   const [search, setSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
@@ -101,31 +104,33 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
           <span className="absolute top-1 right-1 text-[8px] text-red-core opacity-60">📌</span>
         )}
         <ChatIcon />
-        <div className="flex-1 min-w-0">
-          {isRenaming ? (
-            <input
-              ref={renameInputRef}
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              onBlur={() => commitRename(conv.id)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitRename(conv.id);
-                if (e.key === 'Escape') setRenamingId(null);
-                e.stopPropagation();
-              }}
-              onClick={(e) => e.stopPropagation()}
-              className="w-full bg-bg-panel border border-red-core/40 rounded px-1 text-xs text-text-hi outline-none"
-            />
-          ) : (
-            <>
-              <p className={`truncate leading-snug ${isActive ? 'text-text-hi' : 'text-text-lo'}`} style={{ fontSize: 'calc(var(--chat-font-size, 14px) - 2px)' }}>{conv.title}</p>
-              <p className="text-text-lo mt-0.5" style={{ fontSize: 'calc(var(--chat-font-size, 14px) - 5px)' }}>{relativeTime(conv.updatedAt)}</p>
-            </>
-          )}
-        </div>
+        {!isCollapsed && (
+          <div className="flex-1 min-w-0">
+            {isRenaming ? (
+              <input
+                ref={renameInputRef}
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onBlur={() => commitRename(conv.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename(conv.id);
+                  if (e.key === 'Escape') setRenamingId(null);
+                  e.stopPropagation();
+                }}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full bg-bg-panel border border-red-core/40 rounded px-1 text-xs text-text-hi outline-none"
+              />
+            ) : (
+              <>
+                <p className={`truncate leading-snug ${isActive ? 'text-text-hi' : 'text-text-lo'}`} style={{ fontSize: 'calc(var(--chat-font-size, 14px) - 2px)' }}>{conv.title}</p>
+                <p className="text-text-lo mt-0.5" style={{ fontSize: 'calc(var(--chat-font-size, 14px) - 5px)' }}>{relativeTime(conv.updatedAt)}</p>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Hover action buttons */}
-        <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 flex-shrink-0 items-center">
+        {!isCollapsed && <div className="opacity-0 group-hover:opacity-100 flex gap-0.5 flex-shrink-0 items-center">
           {/* Pin */}
           <ActionBtn title={conv.pinned ? 'Unpin' : 'Pin'} onClick={(e) => { e.stopPropagation(); updateConversationMeta(conv.id, { pinned: !conv.pinned }); }}>
             <PinIcon pinned={!!conv.pinned} />
@@ -175,47 +180,57 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
           <ActionBtn title="Delete" onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}>
             <TrashIcon />
           </ActionBtn>
-        </div>
+        </div>}
       </div>
     );
   };
 
   return (
-    <aside className="w-56 flex-shrink-0 bg-bg-panel border-r border-border-hair flex flex-col h-full">
+    <aside
+      style={{ width: 'var(--sidebar-w, 224px)', transition: 'width 0.2s ease' }}
+      className="flex-shrink-0 bg-bg-panel border-r border-border-hair flex flex-col h-full overflow-hidden"
+    >
       {/* Logo */}
-      <div className="px-4 py-4 border-b border-border-hair">
-        <div className="flex items-center gap-2">
+      <div className={`border-b border-border-hair ${isCollapsed ? 'px-2 py-4 flex justify-center' : 'px-4 py-4'}`}>
+        {isCollapsed ? (
           <NanoBricksLogo />
-          <div>
-            <p className="text-xs font-bold text-text-hi font-display tracking-wide">Nano Bricks</p>
-            <p className="text-[10px] text-text-lo">by Bharani</p>
+        ) : (
+          <div className="flex items-center gap-2">
+            <NanoBricksLogo />
+            <div>
+              <p className="text-xs font-bold text-text-hi font-display tracking-wide">Nano Bricks</p>
+              <p className="text-[10px] text-text-lo">by Bharani</p>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* New chat + Search */}
-      <div className="px-3 py-2 border-b border-border-hair space-y-1.5">
+      <div className={`border-b border-border-hair space-y-1.5 ${isCollapsed ? 'px-1.5 py-2' : 'px-3 py-2'}`}>
         <button
           onClick={newConversation}
-          className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-text-lo hover:text-text-hi hover:bg-bg-elevated transition-colors duration-150"
+          title="New conversation"
+          className={`w-full flex items-center gap-2 rounded-lg text-xs text-text-lo hover:text-text-hi hover:bg-bg-elevated transition-colors duration-150 ${isCollapsed ? 'justify-center px-2 py-2' : 'px-3 py-1.5'}`}
         >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="flex-shrink-0">
             <path d="M6 1V11M1 6H11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
-          New conversation
+          {!isCollapsed && 'New conversation'}
         </button>
-        <div className="relative">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-lo pointer-events-none">
-            <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
-          </svg>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search chats…"
-            className="w-full bg-bg-elevated border border-border-hair rounded-lg pl-7 pr-2 py-1.5 text-xs text-text-hi placeholder-text-lo outline-none focus:border-red-core/40 transition-colors"
-          />
-        </div>
+        {!isCollapsed && (
+          <div className="relative">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-lo pointer-events-none">
+              <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
+            </svg>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search chats…"
+              className="w-full bg-bg-elevated border border-border-hair rounded-lg pl-7 pr-2 py-1.5 text-xs text-text-hi placeholder-text-lo outline-none focus:border-red-core/40 transition-colors"
+            />
+          </div>
+        )}
       </div>
 
       {/* Scrollable history */}
@@ -315,15 +330,15 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
       </div>
 
       {/* Footer */}
-      <div className="px-3 py-3 border-t border-border-hair">
-        <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg group">
+      <div className={`border-t border-border-hair ${isCollapsed ? 'px-1.5 py-3' : 'px-3 py-3'}`}>
+        <div className={`flex items-center gap-2 rounded-lg group ${isCollapsed ? 'justify-center px-1 py-1.5' : 'px-2 py-1.5'}`}>
           <div className="w-6 h-6 rounded-full bg-bg-elevated border border-border-hair flex items-center justify-center text-[10px] text-text-hi font-bold flex-shrink-0">
             {avatarLabel}
           </div>
-          <div className="flex-1 min-w-0">
+          {!isCollapsed && <div className="flex-1 min-w-0">
             <p className="text-xs text-text-hi truncate">{displayName || user?.email || 'Not signed in'}</p>
-          </div>
-          {onOpenShortcuts && (
+          </div>}
+          {!isCollapsed && onOpenShortcuts && (
             <button
               onClick={onOpenShortcuts}
               title="Keyboard shortcuts (Ctrl+K)"
@@ -338,11 +353,11 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
           <button
             onClick={() => setShowSettings(true)}
             title="Settings"
-            className="opacity-0 group-hover:opacity-100 transition-opacity text-text-lo hover:text-text-hi mr-1"
+            className={`transition-opacity text-text-lo hover:text-text-hi mr-1 ${isCollapsed ? 'opacity-0 group-hover:opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
           >
             <GearIcon />
           </button>
-          <button
+          {!isCollapsed && <button
             onClick={signOut}
             title="Sign out"
             className="opacity-0 group-hover:opacity-100 transition-opacity text-text-lo hover:text-red-core"
@@ -350,7 +365,7 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
               <path d="M5 2H2a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h3M8 9l3-3-3-3M11 6H5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
-          </button>
+          </button>}
         </div>
       </div>
 
