@@ -4,6 +4,7 @@ import { checkQuota } from './quota';
 import { checkRateLimit } from './ratelimit';
 import { handleChat } from './stream';
 import { handleImage } from './image';
+import { handleSearch } from './search';
 import { checkAndAlertSpend } from './quota';
 
 const CORS_HEADERS = {
@@ -86,6 +87,12 @@ export default {
       if (!rateLimit.ok) return json({ error: 'Too many requests. Please wait a moment before trying again.' }, 429);
       const imageResponse = await handleImage(request, env);
       return cors(imageResponse);
+    }
+
+    // ── Web search proxy endpoint ─────────────────────────────────────────────
+    if (url.pathname === '/v1/search' && request.method === 'POST') {
+      const searchResponse = await handleSearch(request);
+      return cors(searchResponse);
     }
 
     return json({ error: 'Not found.' }, 404);

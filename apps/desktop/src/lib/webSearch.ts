@@ -5,6 +5,8 @@ export interface SearchResult {
   domain: string;
 }
 
+const PROXY_BASE = import.meta.env.VITE_PROXY_URL ?? 'https://api.nanobricks.app';
+
 function extractDomain(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, '');
@@ -14,9 +16,13 @@ function extractDomain(url: string): string {
 }
 
 export async function searchWeb(query: string): Promise<SearchResult[]> {
-  const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Search request failed');
+  // Route through proxy to avoid CORS/network restrictions in the app webview
+  const res = await fetch(`${PROXY_BASE}/v1/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  });
+  if (!res.ok) throw new Error(`Search failed: ${res.status}`);
 
   const data = await res.json() as {
     AbstractText?: string;
