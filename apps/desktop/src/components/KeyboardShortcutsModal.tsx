@@ -1,7 +1,11 @@
 import { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+const isMac = typeof navigator !== 'undefined' && (
+  navigator.userAgent.includes('Mac') ||
+  // @ts-expect-error — userAgentData is not in all TS lib versions yet
+  navigator.userAgentData?.platform === 'macOS'
+);
 const mod = isMac ? '⌘' : 'Ctrl';
 
 const SHORTCUTS = [

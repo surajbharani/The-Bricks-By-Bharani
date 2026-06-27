@@ -389,6 +389,7 @@ export function Composer() {
     const asstMsgId = addMessage({ role: 'assistant', content: '', streaming: true });
     setStreaming(true);
     const thinkingToastIdSWT = addToast({ message: 'AI is thinking…', type: 'info', duration: 0 });
+    let swtErrored = false;
 
     try {
       const gen = streamChat({
@@ -406,6 +407,7 @@ export function Composer() {
       }
     } catch (err) {
       if (err instanceof Error && err.name !== 'AbortError') {
+        swtErrored = true;
         appendToMessage(asstMsgId, `\n\n*Error: ${err.message}*`);
         removeToast(thinkingToastIdSWT);
         addToast({ message: 'Something went wrong. Please try again.', type: 'error', duration: 5000 });
@@ -415,7 +417,10 @@ export function Composer() {
       setStreaming(false);
       abortRef.current = null;
       removeToast(thinkingToastIdSWT);
-      addToast({ message: 'Response ready', type: 'success', duration: 2500 });
+      // Only show success toast if not aborted and no error
+      if (!swtErrored && !ctrl.signal.aborted) {
+        addToast({ message: 'Response ready', type: 'success', duration: 2500 });
+      }
     }
   };
 
@@ -482,6 +487,7 @@ export function Composer() {
     const asstMsgId = addMessage({ role: 'assistant', content: '', streaming: true });
     setStreaming(true);
     const thinkingToastId = addToast({ message: 'AI is thinking…', type: 'info', duration: 0 });
+    let sendErrored = false;
 
     // Build system context (global instructions + memory + project)
     const systemParts: string[] = [];
@@ -527,6 +533,7 @@ export function Composer() {
     } catch (err) {
       // Ignore AbortError — user pressed stop intentionally
       if (err instanceof Error && err.name !== 'AbortError') {
+        sendErrored = true;
         appendToMessage(asstMsgId, `\n\n*Error: ${err.message}*`);
         removeToast(thinkingToastId);
         addToast({ message: 'Something went wrong. Please try again.', type: 'error', duration: 5000 });
@@ -536,7 +543,10 @@ export function Composer() {
       setStreaming(false);
       abortRef.current = null;
       removeToast(thinkingToastId);
-      addToast({ message: 'Response ready', type: 'success', duration: 2500 });
+      // Only show success toast if not aborted and no error
+      if (!sendErrored && !ctrl.signal.aborted) {
+        addToast({ message: 'Response ready', type: 'success', duration: 2500 });
+      }
     }
   };
 
