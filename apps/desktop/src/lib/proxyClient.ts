@@ -21,6 +21,7 @@ export interface ChatRequest {
 
 // Models that support vision/image input
 export const VISION_MODELS = new Set([
+  'openrouter/owl-alpha',
   'openai/gpt-4o',
   'openai/gpt-4o-mini',
   'anthropic/claude-3-5-sonnet',
