@@ -4,8 +4,9 @@ import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./styles/theme.css";
 
-// On startup, validate persisted stores. If any are unparseable, wipe them
-// so a corrupt agent run can never cause a permanent black screen.
+// ── Startup store sanitizer ───────────────────────────────────────────────────
+// Runs before React mounts. Silently wipes any store whose persisted JSON is
+// corrupt or structurally wrong so non-technical users never see a black screen.
 const STORE_KEYS = [
   'nano-bricks-run',
   'nano-bricks-history',
@@ -17,12 +18,19 @@ const STORE_KEYS = [
   'nano-bricks-scheduler',
   'nano-bricks-onboarding',
 ];
+
 for (const key of STORE_KEYS) {
   try {
     const raw = localStorage.getItem(key);
-    if (raw) JSON.parse(raw);
+    if (!raw) continue;
+    const parsed = JSON.parse(raw);
+    // Zustand persist wraps state in { state: {...}, version: n }
+    // If that envelope is missing or state is not an object, wipe it.
+    if (typeof parsed !== 'object' || parsed === null || typeof parsed.state !== 'object') {
+      throw new Error('invalid store envelope');
+    }
   } catch {
-    console.warn(`[startup] Clearing corrupt store: ${key}`);
+    console.warn(`[startup] Wiping corrupt store: ${key}`);
     localStorage.removeItem(key);
   }
 }
