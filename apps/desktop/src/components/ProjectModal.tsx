@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useProjects, type Project, type ProjectFile } from '../store/useProjects';
+import { uuid } from '../lib/uuid';
 
 interface Props {
   project: Project | null;
@@ -47,7 +48,7 @@ export function ProjectModal({ project, onClose }: Props) {
     if (!file) return;
     const text = await file.text();
     addProjectFile(project.id, {
-      id: crypto.randomUUID(),
+      id: uuid(),
       name: file.name,
       text: text.slice(0, 8000),
       addedAt: Date.now(),

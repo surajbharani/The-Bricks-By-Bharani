@@ -4,6 +4,7 @@ import { DEFAULT_MODEL } from '@nano-bricks/shared';
 import { useHistory } from './useHistory';
 import { useProjects } from './useProjects';
 import { useRun } from './useRun';
+import { uuid } from '../lib/uuid';
 
 export type AppMode = 'chat' | 'agent';
 export type AgentMode = 'solo' | 'swarm';
@@ -94,7 +95,7 @@ interface SessionState {
   updateCanvas: (patch: Partial<CanvasDoc>) => void;
 }
 
-function makeId() { return crypto.randomUUID(); }
+function makeId() { return uuid(); }
 
 function deriveTitle(messages: Message[]): string {
   const first = messages.find((m) => m.role === 'user' && m.content.trim());

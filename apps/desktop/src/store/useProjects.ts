@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { uuid } from '../lib/uuid';
 
 export interface ProjectFile {
   id: string;
@@ -38,7 +39,7 @@ export const useProjects = create<ProjectsState>()(
       activeProjectId: null,
 
       createProject: (name) => {
-        const id = crypto.randomUUID();
+        const id = uuid();
         const now = Date.now();
         set((s) => ({
           projects: [

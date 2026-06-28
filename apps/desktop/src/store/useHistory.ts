@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Message } from './useSession';
+import { uuid } from '../lib/uuid';
 
 // ── Stored types ──────────────────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ export const useHistory = create<HistoryState>()(
       saveAgentRun: (run) =>
         set((s) => ({
           agentRuns: [
-            { ...run, id: crypto.randomUUID(), createdAt: Date.now() },
+            { ...run, id: uuid(), createdAt: Date.now() },
             ...s.agentRuns,
           ],
         })),
@@ -116,22 +117,27 @@ export const useHistory = create<HistoryState>()(
           localStorage.removeItem('nano-bricks-history');
         }
       },
+      // Defensive: a single malformed conversation must never throw during
+      // serialization (which would crash the app via the persist write that
+      // runs on saveAgentRun when an agent finishes).
       partialize: (s) => ({
-        conversations: s.conversations.map((c) => ({
+        conversations: (s.conversations ?? []).map((c) => ({
           ...c,
-          messages: c.messages.map((m) => ({
+          messages: (c.messages ?? []).map((m) => ({
             ...m,
             streaming: false,
-            attachments: m.attachments?.map((a) =>
-              a.type === 'image'
-                ? { ...a, dataUrl: undefined }
-                : a.type === 'file'
-                  ? { ...a, text: a.text?.slice(0, 500) }
-                  : a
-            ),
+            attachments: Array.isArray(m.attachments)
+              ? m.attachments.map((a) =>
+                  a.type === 'image'
+                    ? { ...a, dataUrl: undefined }
+                    : a.type === 'file'
+                      ? { ...a, text: a.text?.slice(0, 500) }
+                      : a
+                )
+              : m.attachments,
           })),
         })),
-        agentRuns: s.agentRuns,
+        agentRuns: s.agentRuns ?? [],
       }),
     }
   )

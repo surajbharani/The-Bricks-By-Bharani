@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { uuid } from '../lib/uuid';
 
 export interface Toast {
   id: string;
@@ -19,7 +20,7 @@ export const useToast = create<ToastState>()((set) => ({
   toasts: [],
 
   addToast: (toast) => {
-    const id = crypto.randomUUID();
+    const id = uuid();
     set((s) => ({ toasts: [...s.toasts.slice(-2), { ...toast, id }] }));
     return id;
   },

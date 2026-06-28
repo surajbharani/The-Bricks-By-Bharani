@@ -25,13 +25,19 @@ export function RunView() {
   useEffect(() => {
     if ((status === 'done' || status === 'error') && query && !savedRef.current) {
       savedRef.current = true;
-      saveAgentRun({
-        query,
-        summary: summary || errorMsg || '',
-        status,
-        tokensUsed,
-        model,
-      });
+      // Never let a history-save failure crash the app — it would otherwise
+      // trip the ErrorBoundary and bounce the user out of Agent mode.
+      try {
+        saveAgentRun({
+          query,
+          summary: summary || errorMsg || '',
+          status,
+          tokensUsed,
+          model,
+        });
+      } catch (e) {
+        console.error('[RunView] saveAgentRun failed (non-fatal):', e);
+      }
     }
     if (status === 'idle' || status === 'planning' || status === 'running') {
       savedRef.current = false;

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { uuid } from '../lib/uuid';
 
 export interface MemoryFact {
   id: string;
@@ -37,7 +38,7 @@ export const useMemory = create<MemoryState>()(
         set((s) => ({
           facts: [
             ...s.facts,
-            { id: crypto.randomUUID(), text, createdAt: Date.now() },
+            { id: uuid(), text, createdAt: Date.now() },
           ],
         })),
 

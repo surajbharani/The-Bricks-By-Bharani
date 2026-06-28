@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { uuid } from '../lib/uuid';
 
 export interface ScheduledTask {
   id: string;
@@ -22,7 +23,7 @@ export const useScheduler = create<SchedulerState>()(
       tasks: [],
       addTask: (task) =>
         set((s) => ({
-          tasks: [...s.tasks, { ...task, id: crypto.randomUUID(), status: 'pending' }],
+          tasks: [...s.tasks, { ...task, id: uuid(), status: 'pending' }],
         })),
       removeTask: (id) => set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
       markFired: (id) =>
