@@ -69,6 +69,12 @@ function App() {
     root.style.setProperty('--sidebar-w', swMap[sidebarWidth]);
   }, [fontSize, fontStyle, bubbleDensity, messageWidth, sidebarWidth]);
 
+  // Apply zoom to document.body so fixed-position modals remain correctly anchored
+  useEffect(() => {
+    document.body.style.zoom = `${zoomLevel}%`;
+    return () => { document.body.style.zoom = ''; };
+  }, [zoomLevel]);
+
   // Handle confirmation deep-link: nano-bricks://auth/callback#access_token=...
   useEffect(() => {
     if (!IS_TAURI) return;
@@ -150,7 +156,7 @@ function App() {
 
   return (
     <>
-      <div className="dot-grid flex h-screen w-screen overflow-hidden bg-bg-void" style={{ zoom: `${zoomLevel}%` }}>
+      <div className="dot-grid flex h-screen w-screen overflow-hidden bg-bg-void">
         <Sidebar onOpenShortcuts={() => setShowShortcuts(true)} />
 
         <div className="flex flex-col flex-1 min-w-0 h-full">

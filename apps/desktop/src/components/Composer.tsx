@@ -244,7 +244,14 @@ export function Composer() {
     const handler = (e: Event) => {
       const prompt = (e as CustomEvent<string>).detail;
       setText(prompt);
-      textareaRef.current?.focus();
+      // Resize after React has flushed the state update
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+        el.focus();
+      });
     };
     window.addEventListener('fill-composer', handler);
     return () => window.removeEventListener('fill-composer', handler);
@@ -917,7 +924,7 @@ function StopIcon() {
 function MicIcon({ active }: { active: boolean }) {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <rect x="9" y="2" width="6" height="11" rx="3" fill={active ? '#FF1F2E' : 'none'} />
+      <rect x="9" y="2" width="6" height="11" rx="3" fill={active ? '#FF1F2E' : 'none'} stroke={active ? '#FF1F2E' : 'currentColor'} />
       <path d="M5 10a7 7 0 0 0 14 0" />
       <line x1="12" y1="19" x2="12" y2="23" />
       <line x1="8" y1="23" x2="16" y2="23" />
