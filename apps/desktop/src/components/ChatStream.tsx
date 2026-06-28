@@ -45,22 +45,14 @@ export function ChatStream() {
 
   if (messages.length === 0) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 select-none">
-        <div className="w-12 h-12 rounded-xl bg-bg-panel border border-border-hair flex items-center justify-center">
-          <NanoBricksLogo />
-        </div>
+      <div className="flex-1 flex flex-col items-center justify-center gap-6 select-none px-6">
         <div className="text-center">
-          <p className="text-text-hi font-display font-semibold text-lg">Nano Bricks</p>
-          <p className="text-text-lo text-sm mt-1">Your AI agent, ready to work.</p>
+          <h1 className="text-2xl font-bold text-text-hi font-display">Where should we begin?</h1>
+          <p className="text-text-lo text-sm mt-2">Pick something below or type your own message</p>
         </div>
-        <div className="flex gap-2 mt-2">
-          {STARTERS.map((s) => (
-            <div
-              key={s}
-              className="px-3 py-1.5 bg-bg-panel border border-border-hair rounded-lg text-xs text-text-lo hover:text-text-hi hover:border-red-core/30 transition-colors cursor-default"
-            >
-              {s}
-            </div>
+        <div className="grid grid-cols-3 gap-3 w-full max-w-lg">
+          {QUICK_ACTIONS.map((action) => (
+            <QuickActionChip key={action.label} action={action} />
           ))}
         </div>
       </div>
@@ -347,7 +339,27 @@ function ActionBtn({ children, title, onClick, active, disabled }: {
   );
 }
 
-const STARTERS = ['Summarize a document', 'Write code', 'Research a topic'];
+interface QuickAction { icon: string; label: string; prompt: string; }
+const QUICK_ACTIONS: QuickAction[] = [
+  { icon: '🎨', label: 'Create an image',   prompt: 'Create an image of ' },
+  { icon: '✍️', label: 'Write or edit',      prompt: 'Help me write ' },
+  { icon: '🔍', label: 'Look something up',  prompt: 'Look up and summarize ' },
+];
+
+function QuickActionChip({ action }: { action: QuickAction }) {
+  const onClick = () => {
+    window.dispatchEvent(new CustomEvent('fill-composer', { detail: action.prompt }));
+  };
+  return (
+    <button
+      onClick={onClick}
+      className="flex flex-col items-start gap-2 p-3.5 bg-bg-panel border border-border-hair rounded-xl text-left hover:border-red-core/40 hover:bg-bg-elevated transition-all duration-150 group"
+    >
+      <span className="text-xl">{action.icon}</span>
+      <span className="text-xs font-medium text-text-hi group-hover:text-white leading-snug">{action.label}</span>
+    </button>
+  );
+}
 
 function NanoBricksLogo({ size = 20 }: { size?: number }) {
   return (

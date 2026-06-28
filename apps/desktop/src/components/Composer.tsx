@@ -239,6 +239,17 @@ export function Composer() {
     return () => window.removeEventListener('focus-composer', handler);
   }, []);
 
+  // Pre-fill composer from quick-action chips in empty state
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const prompt = (e as CustomEvent<string>).detail;
+      setText(prompt);
+      textareaRef.current?.focus();
+    };
+    window.addEventListener('fill-composer', handler);
+    return () => window.removeEventListener('fill-composer', handler);
+  }, []);
+
   // Show vision warning when image is attached and model doesn't support it
   useEffect(() => {
     const hasImage = attachments.some((a) => a.type === 'image');
@@ -809,17 +820,6 @@ export function Composer() {
                         </div>
                       </button>
 
-                      {/* Voice Input */}
-                      <button
-                        onClick={() => { toggleVoice(); setShowPlusMenu(false); }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-bg-elevated"
-                        style={{ color: isListening ? '#FF1F2E' : 'var(--text-hi)' }}
-                      >
-                        <span className="w-7 h-7 rounded-lg bg-bg-elevated flex items-center justify-center text-base flex-shrink-0">🎤</span>
-                        <span className="font-medium">{isListening ? 'Stop Listening' : 'Voice Input'}</span>
-                        {isListening && <span className="ml-auto text-[10px] text-red-core animate-pulse">●</span>}
-                      </button>
-
                       {/* Camera */}
                       <button
                         onClick={() => { setShowCamera(true); setShowPlusMenu(false); }}
@@ -857,20 +857,35 @@ export function Composer() {
               )}
             </div>
 
-            {/* Right: send / stop button */}
+            {/* Right: mic + send / stop button */}
             <div className="flex items-center gap-1.5">
-            <motion.button
-              onClick={isStreaming ? stopStreaming : send}
-              disabled={!isStreaming && !canSend}
-              whileTap={{ scale: 0.92 }}
-              className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-150 flex-shrink-0"
-              style={{
-                background: isStreaming ? '#FF1F2E' : canSend ? '#FF1F2E' : '#26262B',
-                cursor: (isStreaming || canSend) ? 'pointer' : 'not-allowed',
-              }}
-            >
-              {isStreaming ? <StopIcon /> : <SendIcon />}
-            </motion.button>
+              {/* Mic button — always visible on right side */}
+              <motion.button
+                onClick={toggleVoice}
+                whileTap={{ scale: 0.92 }}
+                title={isListening ? 'Stop listening' : 'Voice input'}
+                className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-150 flex-shrink-0"
+                style={{
+                  background: isListening ? '#FF1F2E22' : 'transparent',
+                  border: isListening ? '1px solid #FF1F2E55' : '1px solid transparent',
+                  color: isListening ? '#FF1F2E' : 'var(--text-lo)',
+                }}
+              >
+                <MicIcon active={isListening} />
+              </motion.button>
+
+              <motion.button
+                onClick={isStreaming ? stopStreaming : send}
+                disabled={!isStreaming && !canSend}
+                whileTap={{ scale: 0.92 }}
+                className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-150 flex-shrink-0"
+                style={{
+                  background: isStreaming ? '#FF1F2E' : canSend ? '#FF1F2E' : '#26262B',
+                  cursor: (isStreaming || canSend) ? 'pointer' : 'not-allowed',
+                }}
+              >
+                {isStreaming ? <StopIcon /> : <SendIcon />}
+              </motion.button>
             </div>
           </div>
         </div>
@@ -896,6 +911,16 @@ function StopIcon() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
       <rect x="1" y="1" width="8" height="8" rx="1" fill="#F4F4F6" />
+    </svg>
+  );
+}
+function MicIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <rect x="9" y="2" width="6" height="11" rx="3" fill={active ? '#FF1F2E' : 'none'} />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <line x1="12" y1="19" x2="12" y2="23" />
+      <line x1="8" y1="23" x2="16" y2="23" />
     </svg>
   );
 }

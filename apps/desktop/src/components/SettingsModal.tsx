@@ -10,7 +10,7 @@ interface Props {
 export function SettingsModal({ onClose }: Props) {
   const { settings, facts, updateSettings, addFact, updateFact, deleteFact, clearAllFacts } = useMemory();
   const { user } = useAuth();
-  const { fontSize, fontStyle, bubbleDensity, messageWidth, sidebarWidth, sendKey, notificationSound, setFontSize, setFontStyle, setBubbleDensity, setMessageWidth, setSidebarWidth, setSendKey, setNotificationSound } = useTheme();
+  const { fontSize, fontStyle, bubbleDensity, messageWidth, sidebarWidth, sendKey, notificationSound, zoomLevel, setFontSize, setFontStyle, setBubbleDensity, setMessageWidth, setSidebarWidth, setSendKey, setNotificationSound, setZoomLevel } = useTheme();
 
   const [tab, setTab] = useState<'profile' | 'memory' | 'instructions' | 'appearance'>('profile');
   const [displayName, setDisplayName] = useState(settings.displayName);
@@ -238,6 +238,29 @@ export function SettingsModal({ onClose }: Props) {
                 >
                   <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${notificationSound ? 'left-5' : 'left-0.5'}`} />
                 </button>
+              </div>
+
+              {/* Zoom Level */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs text-text-hi font-medium">Zoom Level</p>
+                  <span className="text-xs font-mono text-red-core font-semibold">{zoomLevel}%</span>
+                </div>
+                <p className="text-[10px] text-text-lo mb-2">Scale the entire app dashboard</p>
+                <input
+                  type="range"
+                  min={100}
+                  max={250}
+                  step={5}
+                  value={zoomLevel}
+                  onChange={(e) => setZoomLevel(Number(e.target.value))}
+                  className="w-full accent-red-core cursor-pointer"
+                />
+                <div className="flex justify-between text-[9px] text-text-lo mt-1">
+                  <span>100%</span>
+                  <span>175%</span>
+                  <span>250%</span>
+                </div>
               </div>
             </div>
           )}

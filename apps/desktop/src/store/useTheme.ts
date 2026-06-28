@@ -18,6 +18,7 @@ interface ThemeState {
   sidebarWidth: SidebarWidth;
   sendKey: SendKey;
   notificationSound: boolean;
+  zoomLevel: number;
 
   toggleTheme: () => void;
   setTheme: (t: Theme) => void;
@@ -28,6 +29,7 @@ interface ThemeState {
   setSidebarWidth: (v: SidebarWidth) => void;
   setSendKey: (v: SendKey) => void;
   setNotificationSound: (v: boolean) => void;
+  setZoomLevel: (v: number) => void;
 }
 
 export const useTheme = create<ThemeState>()(
@@ -41,6 +43,7 @@ export const useTheme = create<ThemeState>()(
       sidebarWidth: 'normal',
       sendKey: 'enter',
       notificationSound: false,
+      zoomLevel: 100,
 
       toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
       setTheme: (t) => set({ theme: t }),
@@ -51,6 +54,7 @@ export const useTheme = create<ThemeState>()(
       setSidebarWidth: (v) => set({ sidebarWidth: v }),
       setSendKey: (v) => set({ sendKey: v }),
       setNotificationSound: (v) => set({ notificationSound: v }),
+      setZoomLevel: (v) => set({ zoomLevel: Math.max(100, Math.min(250, v)) }),
     }),
     { name: 'nano-bricks-theme' }
   )

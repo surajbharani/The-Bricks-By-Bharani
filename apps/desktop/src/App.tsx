@@ -34,7 +34,7 @@ function App() {
   const { mode, showCanvas, setShowCanvas, newConversation } = useSession();
   const { resetRun } = useRun();
   const { projects, activeProjectId } = useProjects();
-  const { theme, fontSize, fontStyle, bubbleDensity, messageWidth, sidebarWidth } = useTheme();
+  const { theme, fontSize, fontStyle, bubbleDensity, messageWidth, sidebarWidth, zoomLevel } = useTheme();
   const { completed } = useOnboarding();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
 
@@ -150,7 +150,7 @@ function App() {
 
   return (
     <>
-      <div className="dot-grid flex h-screen w-screen overflow-hidden bg-bg-void">
+      <div className="dot-grid flex h-screen w-screen overflow-hidden bg-bg-void" style={{ zoom: `${zoomLevel}%` }}>
         <Sidebar onOpenShortcuts={() => setShowShortcuts(true)} />
 
         <div className="flex flex-col flex-1 min-w-0 h-full">
