@@ -55,8 +55,9 @@ export function SwarmLane({ subagents }: Props) {
               {idx < list.length - 1 && agent.status === 'done' && (
                 <motion.div
                   className="absolute left-[30px] w-2 h-2 rounded-full z-10"
-                  style={{ background: STATUS_COLOR.done, top: '100%', marginTop: 4 }}
-                  animate={{ y: [0, 32, 0] }}
+                  style={{ background: STATUS_COLOR.done }}
+                  initial={{ top: 'calc(100% + 4px)' }}
+                  animate={{ top: ['calc(100% + 4px)', 'calc(100% + 36px)', 'calc(100% + 4px)'] }}
                   transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
                 />
               )}

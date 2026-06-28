@@ -52,7 +52,9 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
     return () => document.removeEventListener('mousedown', handler);
   }, [folderMenuId]);
 
-  const sortedRuns = [...agentRuns].sort((a, b) => b.createdAt - a.createdAt);
+  const sortedRuns = [...agentRuns]
+    .filter((r) => !q || r.query.toLowerCase().includes(q) || r.summary?.toLowerCase().includes(q))
+    .sort((a, b) => b.createdAt - a.createdAt);
 
   const q = search.toLowerCase().trim();
   const allConvs = [...conversations].sort((a, b) => {

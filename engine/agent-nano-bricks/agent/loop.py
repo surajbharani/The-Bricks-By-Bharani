@@ -82,6 +82,7 @@ def run_solo(
     client: OpenAI,
     caps: dict,
     step_offset: int = 0,
+    emit_identity: bool = True,
 ) -> dict:
     """
     Run a solo agent loop. Returns {ok, summary, tokens_used, inr}.
@@ -97,10 +98,11 @@ def run_solo(
     workspace = workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=True)
 
-    # Emit solo agent identity with a random Indian female name
+    # Emit solo agent identity with a random Indian female name (skip when called from swarm)
     solo_id = str(uuid.uuid4())[:8]
     solo_name = random.choice(_SOLO_NAMES)
-    emit_subagent(solo_id, query[:80], "spawned", name=solo_name)
+    if emit_identity:
+        emit_subagent(solo_id, query[:80], "spawned", name=solo_name)
 
     # ── Step 0: Plan ──────────────────────────────────────────────────────────
     try:
@@ -124,7 +126,8 @@ def run_solo(
 
     steps = _extract_plan(plan_text)
     emit_plan(steps)
-    emit_subagent(solo_id, query[:80], "working", name=solo_name)
+    if emit_identity:
+        emit_subagent(solo_id, query[:80], "working", name=solo_name)
 
     # ── Main execution loop ───────────────────────────────────────────────────
     messages: list[dict] = [
@@ -267,6 +270,7 @@ def run_solo(
     # ── Summary ───────────────────────────────────────────────────────────────
     summary = last_response[:500] if last_response else "Task completed."
     tokens_used = total_prompt_tokens + total_completion_tokens
-    emit_subagent(solo_id, query[:80], "done", summary=summary[:200], name=solo_name)
+    if emit_identity:
+        emit_subagent(solo_id, query[:80], "done", summary=summary[:200], name=solo_name)
     emit_done(True, summary, tokens_used)
     return {"ok": True, "summary": summary, "tokens_used": tokens_used, "inr": total_inr}

@@ -93,7 +93,7 @@ def run_swarm(
         emit_subagent(agent_id, brick["goal"], "working", name=agent_name)
 
         brick_client = client if client is not None else make_client(jwt)
-        result = run_solo(enriched_query, model, brick_workspace, brick_client, brick_caps)
+        result = run_solo(enriched_query, model, brick_workspace, brick_client, brick_caps, emit_identity=False)
         summary = _compress_summary(result)
 
         with lock:
