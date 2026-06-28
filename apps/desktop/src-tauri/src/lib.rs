@@ -1,7 +1,14 @@
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter};
+use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_deep_link::DeepLinkExt;
+use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
+
+// Shared handle to the currently-running sidecar so a separate command can
+// write the user's answer to its stdin (human-in-the-loop ask_user / approvals).
+#[derive(Default)]
+struct AgentChild(Arc<Mutex<Option<CommandChild>>>);
 
 #[derive(serde::Deserialize, Debug)]
 pub struct AgentRunRequest {
@@ -13,12 +20,14 @@ pub struct AgentRunRequest {
     pub openrouter_key: Option<String>,
     pub deepseek_key: Option<String>,
     pub caps: serde_json::Value,
+    pub action: Option<String>,
+    pub checkpoint: Option<String>,
 }
 
 // Commands are NOT pub — tauri v2 generate_handler! sees pub commands as both
 // a local definition and a crate-root re-export, producing duplicate macro errors.
 #[tauri::command]
-async fn agent_run(app: AppHandle, request: AgentRunRequest) -> Result<(), String> {
+async fn agent_run(app: AppHandle, state: State<'_, AgentChild>, request: AgentRunRequest) -> Result<(), String> {
     let workspace = match &request.workspace {
         Some(p) if !p.is_empty() => PathBuf::from(p),
         _ => dirs::document_dir()
@@ -36,6 +45,8 @@ async fn agent_run(app: AppHandle, request: AgentRunRequest) -> Result<(), Strin
         "openrouter_key": request.openrouter_key.unwrap_or_default(),
         "deepseek_key":   request.deepseek_key.unwrap_or_default(),
         "caps":           request.caps,
+        "action":         request.action.unwrap_or_else(|| "run".to_string()),
+        "checkpoint":     request.checkpoint.unwrap_or_default(),
     })
     .to_string();
 
@@ -52,6 +63,10 @@ async fn agent_run(app: AppHandle, request: AgentRunRequest) -> Result<(), Strin
     child
         .write(format!("{}\n", req_json).as_bytes())
         .map_err(|e| format!("Failed to write to sidecar stdin: {e}"))?;
+
+    // Hand the child to shared state so agent_answer can write the user's
+    // reply to stdin while this run is streaming events.
+    *state.0.lock().unwrap() = Some(child);
 
     use tauri_plugin_shell::process::CommandEvent;
     while let Some(event) = rx.recv().await {
@@ -70,7 +85,25 @@ async fn agent_run(app: AppHandle, request: AgentRunRequest) -> Result<(), Strin
         }
     }
 
+    // Run finished — drop the shared child handle.
+    *state.0.lock().unwrap() = None;
     Ok(())
+}
+
+// Send the user's answer to a pending ask_user / approval prompt by writing one
+// JSON line to the running sidecar's stdin.
+#[tauri::command]
+fn agent_answer(state: State<'_, AgentChild>, answer: String) -> Result<(), String> {
+    let mut guard = state.0.lock().unwrap();
+    if let Some(child) = guard.as_mut() {
+        let line = serde_json::json!({ "answer": answer }).to_string();
+        child
+            .write(format!("{}\n", line).as_bytes())
+            .map_err(|e| format!("Failed to send answer: {e}"))?;
+        Ok(())
+    } else {
+        Err("No active agent run to answer.".to_string())
+    }
 }
 
 #[tauri::command]
@@ -139,6 +172,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_deep_link::init())
+        .manage(AgentChild::default())
         .setup(|app| {
             let handle = app.handle().clone();
             // Forward deep-link URLs to the frontend so auth can complete
@@ -149,7 +183,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![agent_run, agent_stop, run_code])
+        .invoke_handler(tauri::generate_handler![agent_run, agent_answer, agent_stop, run_code])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

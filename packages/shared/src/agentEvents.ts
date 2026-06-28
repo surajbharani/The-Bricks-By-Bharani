@@ -8,5 +8,7 @@ export type AgentEvent =
   | { t: 'token'; text: string }
   | { t: 'subagent'; id: string; brick: string; name?: string; status: 'spawned' | 'working' | 'done'; summary?: string }
   | { t: 'spend'; tokens: number; inr: number }
+  | { t: 'checkpoint'; id: string; label?: string }
+  | { t: 'ask'; id: string; question: string; kind?: 'question' | 'approval'; options?: string[] }
   | { t: 'done'; ok: boolean; summary: string; tokensUsed: number }
   | { t: 'error'; message: string };

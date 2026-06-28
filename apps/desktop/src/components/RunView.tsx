@@ -8,6 +8,8 @@ import { TokenStream } from './TokenStream';
 import { SwarmLane } from './SwarmLane';
 import { WorkspaceTree } from './WorkspaceTree';
 import { SummaryChip } from './SummaryChip';
+import { AskPrompt } from './AskPrompt';
+import { UndoButton } from './UndoButton';
 
 export function RunView() {
   const { status, query, plan, thinking, steps, subagents, tokenStream, files, summary, errorMsg, tokensUsed, inr, agentHistory } =
@@ -175,6 +177,9 @@ export function RunView() {
         {/* File activity */}
         <WorkspaceTree files={files} />
 
+        {/* Human-in-the-loop prompt (question / approval) */}
+        <AskPrompt />
+
         {/* Summary / error chips */}
         {status === 'done' && (
           <SummaryChip ok={true} summary={summary} tokensUsed={tokensUsed} inr={inr} />
@@ -182,6 +187,9 @@ export function RunView() {
         {status === 'error' && (
           <SummaryChip ok={false} summary={errorMsg} tokensUsed={tokensUsed} inr={inr} />
         )}
+
+        {/* One-click Undo for the whole task */}
+        {(status === 'done' || status === 'error') && <UndoButton />}
       </motion.div>
       </>
       )}

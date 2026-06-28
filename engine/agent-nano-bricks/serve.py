@@ -47,6 +47,32 @@ def _emit_error(message: str) -> None:
     print(json.dumps({"t": "error", "message": message}), flush=True)
 
 
+def _make_ask_fn():
+    """Returns a blocking ask(question, kind, options) -> answer:str.
+    Emits an 'ask' event then waits for one JSON line on stdin: {"answer": "..."}.
+    If stdin closes (no UI attached), returns '' so callers can fall back."""
+    import uuid as _uuid
+    from agent.events import emit_ask
+
+    def ask(question: str, kind: str = "question", options=None) -> str:
+        aid = str(_uuid.uuid4())[:8]
+        emit_ask(aid, question, kind, options)
+        try:
+            line = sys.stdin.readline()
+        except Exception:
+            return ""
+        if not line:
+            return ""
+        line = line.strip()
+        try:
+            data = json.loads(line)
+            return str(data.get("answer", ""))
+        except Exception:
+            return line
+
+    return ask
+
+
 def main() -> None:
     # ── Parse request ─────────────────────────────────────────────────────────
     try:
@@ -140,11 +166,14 @@ def main() -> None:
     except Exception:
         checkpoint = None
 
+    # ── Human-in-the-loop: blocking ask() for questions/approvals ─────────────
+    ask_fn = _make_ask_fn()
+
     # ── Dispatch ──────────────────────────────────────────────────────────────
     if mode == "swarm":
-        _run_swarm(query, model, workspace, jwt, client, caps, memory, skills, checkpoint)
+        _run_swarm(query, model, workspace, jwt, client, caps, memory, skills, checkpoint, ask_fn)
     else:
-        _run_solo(query, model, workspace, client, caps, memory, skills, checkpoint)
+        _run_solo(query, model, workspace, client, caps, memory, skills, checkpoint, ask_fn)
 
     # ── Finalize checkpoint → offer Undo if anything changed ──────────────────
     try:
@@ -163,16 +192,17 @@ def main() -> None:
         pass
 
 
-def _run_solo(query, model, workspace, client, caps, memory=None, skills=None, checkpoint=None):
+def _run_solo(query, model, workspace, client, caps, memory=None, skills=None, checkpoint=None, ask_fn=None):
     from agent.loop import run_solo
     try:
         run_solo(query, model, workspace, client, caps,
-                 emit_identity=True, memory=memory, skills=skills, checkpoint=checkpoint)
+                 emit_identity=True, memory=memory, skills=skills,
+                 checkpoint=checkpoint, ask_fn=ask_fn)
     except Exception as e:
         _emit_error(f"Agent error: {e}")
 
 
-def _run_swarm(query, model, workspace, jwt, client, caps, memory=None, skills=None, checkpoint=None):
+def _run_swarm(query, model, workspace, jwt, client, caps, memory=None, skills=None, checkpoint=None, ask_fn=None):
     from swarm.decompose import decompose
     from swarm.scheduler import run_swarm
     from agent.events import emit_thinking

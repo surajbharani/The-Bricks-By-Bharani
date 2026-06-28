@@ -706,6 +706,20 @@ def describe_image(workspace: Path, path: str, question: str = "",
 
 # ── Agent Delegation Tool ─────────────────────────────────────────────────────
 
+def ask_user(workspace: Path, question: str, context: Optional[dict] = None) -> dict[str, Any]:
+    """Ask the user a clarifying question mid-task and wait for their answer.
+    Use when the task is ambiguous and guessing would waste work."""
+    ask = context.get("ask_fn") if context else None
+    if ask is None:
+        return {"ok": False, "error": "Cannot ask the user right now — make a reasonable assumption and continue."}
+    if not question.strip():
+        return {"ok": False, "error": "question is empty."}
+    answer = ask(question, "question", None)
+    if not answer:
+        return {"ok": True, "answer": "(no answer — proceed with your best judgement)"}
+    return {"ok": True, "answer": answer}
+
+
 def spawn_subagent(workspace: Path, goal: str, context: Optional[dict] = None) -> dict[str, Any]:
     """Delegate a focused subtask to a fresh sub-agent that shares this workspace.
     The sub-agent plans and executes independently, then reports back a summary."""
@@ -789,6 +803,8 @@ TOOL_DEFINITIONS = [
         {"path": {"type": "string"}, "question": {"type": "string"}}, ["path"]),
     _fn("describe_image", "Look at an image and describe it or answer a question about it (vision).",
         {"path": {"type": "string"}, "question": {"type": "string"}}, ["path"]),
+    _fn("ask_user", "Ask the user a clarifying question mid-task and wait for their answer. Use only when the task is genuinely ambiguous and guessing would waste work.",
+        {"question": {"type": "string"}}, ["question"]),
     _fn("spawn_subagent", "Delegate a focused subtask to a fresh sub-agent that shares this workspace and reports back. Use to parallelize or isolate a self-contained chunk of work.",
         {"goal": {"type": "string", "description": "Clear, self-contained subtask description"}}, ["goal"]),
 ]
@@ -862,6 +878,8 @@ def dispatch_tool(workspace: Path, name: str, args: dict, context: Optional[dict
             return analyze_data(workspace, args["path"], args.get("question", ""))
         if name == "describe_image":
             return describe_image(workspace, args["path"], args.get("question", ""), context)
+        if name == "ask_user":
+            return ask_user(workspace, args["question"], context)
         if name == "spawn_subagent":
             return spawn_subagent(workspace, args["goal"], context)
         return {"ok": False, "error": f"Unknown tool: {name}"}

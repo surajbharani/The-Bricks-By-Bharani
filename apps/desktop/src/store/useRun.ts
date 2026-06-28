@@ -29,6 +29,13 @@ export interface FileActivity {
   action: 'write' | 'edit';
 }
 
+export interface PendingAsk {
+  id: string;
+  question: string;
+  kind: 'question' | 'approval';
+  options?: string[];
+}
+
 export type RunStatus = 'idle' | 'planning' | 'running' | 'done' | 'error';
 
 export interface AgentHistoryItem {
@@ -54,6 +61,8 @@ interface RunState {
   inr: number;
   summary: string;
   errorMsg: string;
+  pendingAsk: PendingAsk | null;
+  lastCheckpoint: string | null;
 
   // Persistent within the session — survives individual run resets
   agentHistory: AgentHistoryItem[];
@@ -61,11 +70,12 @@ interface RunState {
   startRun: (query: string) => void;
   applyEvent: (event: AgentEvent) => void;
   resetRun: () => void;
+  clearAsk: () => void;
   appendAgentHistory: (query: string, response: string) => void;
   clearAgentHistory: () => void;
 }
 
-const INITIAL: Omit<RunState, 'startRun' | 'applyEvent' | 'resetRun' | 'appendAgentHistory' | 'clearAgentHistory' | 'agentHistory'> = {
+const INITIAL: Omit<RunState, 'startRun' | 'applyEvent' | 'resetRun' | 'clearAsk' | 'appendAgentHistory' | 'clearAgentHistory' | 'agentHistory'> = {
   status: 'idle',
   query: '',
   plan: [],
@@ -79,6 +89,8 @@ const INITIAL: Omit<RunState, 'startRun' | 'applyEvent' | 'resetRun' | 'appendAg
   inr: 0,
   summary: '',
   errorMsg: '',
+  pendingAsk: null,
+  lastCheckpoint: null,
 };
 
 export const useRun = create<RunState>()(
@@ -91,6 +103,8 @@ export const useRun = create<RunState>()(
     set((s) => ({ ...INITIAL, agentHistory: s.agentHistory, status: 'planning', query, tokenStream: '' })),
 
   resetRun: () => set((s) => ({ ...INITIAL, agentHistory: s.agentHistory })),
+
+  clearAsk: () => set({ pendingAsk: null }),
 
   appendAgentHistory: (query, response) =>
     set((s) => ({ agentHistory: [...s.agentHistory, { query, response }] })),
@@ -156,6 +170,19 @@ export const useRun = create<RunState>()(
         case 'spend':
           return { tokensUsed: event.tokens, inr: event.inr };
 
+        case 'ask':
+          return {
+            pendingAsk: {
+              id: event.id,
+              question: event.question,
+              kind: event.kind ?? 'question',
+              options: event.options,
+            },
+          };
+
+        case 'checkpoint':
+          return { lastCheckpoint: event.id };
+
         case 'done': {
           const agents = Object.values(s.subagents);
           const agentNames = [...new Set(agents.map((a) => a.name).filter(Boolean))] as string[];
@@ -165,6 +192,7 @@ export const useRun = create<RunState>()(
             status: 'done',
             summary: event.summary,
             tokensUsed: event.tokensUsed,
+            pendingAsk: null,
             agentHistory: [
               ...s.agentHistory,
               {
@@ -183,6 +211,7 @@ export const useRun = create<RunState>()(
           return {
             status: 'error',
             errorMsg: event.message,
+            pendingAsk: null,
             agentHistory: [
               ...s.agentHistory,
               { query: s.query, response: `⚠️ ${event.message}` },

@@ -96,6 +96,7 @@ def run_solo(
     memory=None,
     skills=None,
     checkpoint=None,
+    ask_fn=None,
 ) -> dict:
     """Run a solo agent loop with the full capability set.
     Returns {ok, summary, tokens_used, inr}."""
@@ -320,10 +321,22 @@ def run_solo(
                 arg_summary = ", ".join(f"{k}={str(v)[:80]}" for k, v in fn_args.items())
                 emit_tool_call(fn_name, arg_summary)
 
+                # ── Approval gate — pause for the user before irreversible acts ─
+                if ask_fn is not None and _needs_approval(fn_name, fn_args):
+                    answer = ask_fn(
+                        _approval_question(fn_name, fn_args), "approval", ["Yes", "No"]
+                    )
+                    if answer and answer.strip().lower() not in ("yes", "y", "approve", "ok", "allow"):
+                        declined = {"ok": False, "error": "The user declined this action. Do not retry it; continue with the rest of the task or ask what they'd prefer."}
+                        emit_tool_result(fn_name, "Declined by user", False)
+                        messages.append({"role": "tool", "tool_call_id": tc["id"], "content": json.dumps(declined)})
+                        continue
+
                 tool_context = {
                     "client": client, "model": current_model, "caps": caps,
                     "depth": caps.get("_subagent_depth", 0),
                     "checkpoint": checkpoint,
+                    "ask_fn": ask_fn,
                 }
                 result = None
                 for attempt in range(MAX_TOOL_RETRIES):
@@ -421,6 +434,34 @@ def run_solo(
         pass
 
     return result
+
+
+# Shell patterns that are irreversible / reach outside the workspace.
+_DANGER_SHELL = re.compile(
+    r"\b(rm\s+-rf|rmdir|del\s|format\s|mkfs|dd\s|shutdown|reboot|"
+    r"git\s+push|npm\s+publish|pip\s+uninstall|curl\s+.*-X\s*(POST|PUT|DELETE)|"
+    r"scp\s|rsync\s|ssh\s)\b",
+    re.IGNORECASE,
+)
+
+
+def _needs_approval(fn_name: str, fn_args: dict) -> bool:
+    """Ask only when it matters — irreversible or outside-world actions.
+    File edits/deletes are already covered by Undo, so we only gate the truly
+    risky ones: dangerous shell commands and external sends."""
+    if fn_name == "shell_exec":
+        return bool(_DANGER_SHELL.search(fn_args.get("command", "")))
+    if fn_name == "web_fetch":
+        return fn_args.get("method", "GET").upper() in ("POST", "PUT", "DELETE", "PATCH")
+    return False
+
+
+def _approval_question(fn_name: str, fn_args: dict) -> str:
+    if fn_name == "shell_exec":
+        return f"The agent wants to run this command:\n\n{fn_args.get('command','')[:300]}\n\nAllow it?"
+    if fn_name == "web_fetch":
+        return f"The agent wants to send a {fn_args.get('method','GET')} request to:\n{fn_args.get('url','')[:200]}\n\nAllow it?"
+    return f"Allow the agent to run {fn_name}?"
 
 
 def _verify_work(client: OpenAI, model: str, query: str, last_response: str, workspace: Path) -> dict:
