@@ -126,33 +126,39 @@ export const useAuth = create<AuthState>()((set, get) => ({
 
     const today = new Date().toISOString().slice(0, 10);
 
-    const [usageRes, subRes] = await Promise.all([
-      supabase
-        .from('usage_daily')
-        .select('prompt_tokens, completion_tokens, est_inr')
-        .eq('user_id', user.id)
-        .eq('day', today)
-        .maybeSingle(),
-      supabase
-        .from('subscriptions')
-        .select('tier_id, tiers(daily_token_cap)')
-        .eq('user_id', user.id)
-        .maybeSingle(),
-    ]);
+    // Never let a usage-fetch failure (network/401/etc.) bubble up — it must not
+    // affect the session or surface as an unhandled rejection.
+    try {
+      const [usageRes, subRes] = await Promise.all([
+        supabase
+          .from('usage_daily')
+          .select('prompt_tokens, completion_tokens, est_inr')
+          .eq('user_id', user.id)
+          .eq('day', today)
+          .maybeSingle(),
+        supabase
+          .from('subscriptions')
+          .select('tier_id, tiers(daily_token_cap)')
+          .eq('user_id', user.id)
+          .maybeSingle(),
+      ]);
 
-    const row = usageRes.data;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tierData = subRes.data as any;
-    const dailyTokenCap = tierData?.tiers?.daily_token_cap ?? 50_000;
+      const row = usageRes.data;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tierData = subRes.data as any;
+      const dailyTokenCap = tierData?.tiers?.daily_token_cap ?? 50_000;
 
-    set({
-      usage: {
-        promptTokens: row?.prompt_tokens ?? 0,
-        completionTokens: row?.completion_tokens ?? 0,
-        estInr: row?.est_inr ?? 0,
-        dailyTokenCap,
-      },
-    });
+      set({
+        usage: {
+          promptTokens: row?.prompt_tokens ?? 0,
+          completionTokens: row?.completion_tokens ?? 0,
+          estInr: row?.est_inr ?? 0,
+          dailyTokenCap,
+        },
+      });
+    } catch (e) {
+      console.warn('[useAuth] refreshUsage failed (non-fatal):', e);
+    }
   },
 }));
 
