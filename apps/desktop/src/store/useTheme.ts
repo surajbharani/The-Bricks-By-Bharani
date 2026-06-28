@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { deviceStorage } from '../lib/storage';
 
 type Theme = 'dark' | 'light';
 export type FontSize      = 'small' | 'medium' | 'large';
@@ -56,6 +57,6 @@ export const useTheme = create<ThemeState>()(
       setNotificationSound: (v) => set({ notificationSound: v }),
       setZoomLevel: (v) => set({ zoomLevel: Math.max(100, Math.min(250, v)) }),
     }),
-    { name: 'nano-bricks-theme' }
+    { name: 'nano-bricks-theme', storage: deviceStorage }
   )
 );

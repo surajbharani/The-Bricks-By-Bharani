@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { uuid } from '../lib/uuid';
+import { deviceStorage } from '../lib/storage';
 
 export interface ProjectFile {
   id: string;
@@ -85,10 +86,11 @@ export const useProjects = create<ProjectsState>()(
     }),
     {
       name: 'nano-bricks-projects',
+      storage: deviceStorage,
       partialize: (s) => ({
-        projects: s.projects.map((p) => ({
+        projects: (s.projects ?? []).map((p) => ({
           ...p,
-          files: p.files.map((f) => ({ ...f, text: f.text.slice(0, 500) })),
+          files: (p.files ?? []).map((f) => ({ ...f, text: (f.text ?? '').slice(0, 500) })),
         })),
         activeProjectId: s.activeProjectId,
       }),

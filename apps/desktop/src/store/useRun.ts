@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AgentEvent } from '@nano-bricks/shared';
+import { deviceStorage } from '../lib/storage';
 
 export interface RunStep {
   i: number;
@@ -195,6 +196,7 @@ export const useRun = create<RunState>()(
     }),
     {
       name: 'nano-bricks-run',
+      storage: deviceStorage,
       // Only persist the conversation thread — transient run state stays in memory
       partialize: (s) => ({ agentHistory: s.agentHistory }),
       onRehydrateStorage: () => (_state, error) => {

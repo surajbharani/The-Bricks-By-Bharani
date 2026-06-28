@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { deviceStorage } from '../lib/storage';
 
 interface OnboardingState {
   completed: boolean;
@@ -14,6 +15,6 @@ export const useOnboarding = create<OnboardingState>()(
       completeOnboarding: () => set({ completed: true }),
       resetOnboarding: () => set({ completed: false }),
     }),
-    { name: 'nano-bricks-onboarding' }
+    { name: 'nano-bricks-onboarding', storage: deviceStorage }
   )
 );

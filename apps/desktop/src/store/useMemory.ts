@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { uuid } from '../lib/uuid';
+import { deviceStorage } from '../lib/storage';
 
 export interface MemoryFact {
   id: string;
@@ -52,6 +53,6 @@ export const useMemory = create<MemoryState>()(
 
       clearAllFacts: () => set({ facts: [] }),
     }),
-    { name: 'nano-bricks-memory' }
+    { name: 'nano-bricks-memory', storage: deviceStorage }
   )
 );

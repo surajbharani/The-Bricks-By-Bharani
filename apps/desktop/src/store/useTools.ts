@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { deviceStorage } from '../lib/storage';
 
 export interface ToolDef {
   id: string;
@@ -28,6 +29,6 @@ export const useTools = create<ToolsState>()(
         set((s) => ({ enabled: { ...s.enabled, [id]: !s.enabled[id] } })),
       isEnabled: (id) => get().enabled[id] ?? false,
     }),
-    { name: 'nano-bricks-tools' }
+    { name: 'nano-bricks-tools', storage: deviceStorage }
   )
 );

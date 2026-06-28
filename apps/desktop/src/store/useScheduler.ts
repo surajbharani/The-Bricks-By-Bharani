@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { uuid } from '../lib/uuid';
+import { deviceStorage } from '../lib/storage';
 
 export interface ScheduledTask {
   id: string;
@@ -36,6 +37,6 @@ export const useScheduler = create<SchedulerState>()(
           }),
         })),
     }),
-    { name: 'nano-bricks-scheduler' }
+    { name: 'nano-bricks-scheduler', storage: deviceStorage }
   )
 );

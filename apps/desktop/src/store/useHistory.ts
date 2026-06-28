@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Message } from './useSession';
 import { uuid } from '../lib/uuid';
+import { deviceStorage } from '../lib/storage';
 
 // ── Stored types ──────────────────────────────────────────────────────────────
 
@@ -111,6 +112,7 @@ export const useHistory = create<HistoryState>()(
     }),
     {
       name: 'nano-bricks-history',
+      storage: deviceStorage,
       onRehydrateStorage: () => (_state, error) => {
         if (error) {
           console.error('[useHistory] Failed to rehydrate, clearing store:', error);
