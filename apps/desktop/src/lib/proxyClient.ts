@@ -60,7 +60,9 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<StreamChunk>
   const isDev = useAuth.getState().isDev;
 
   if (isDev) {
-    if (OPENROUTER_KEY) {
+    if (DEEPSEEK_KEY && req.model.startsWith('deepseek/')) {
+      yield* streamDeepSeek(req, signal);
+    } else if (OPENROUTER_KEY) {
       yield* streamOpenRouter(req, signal);
     } else {
       yield* devStub();

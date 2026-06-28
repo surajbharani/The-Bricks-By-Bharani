@@ -6,10 +6,14 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 
 # INR per 1K tokens (mirrors services/proxy/src/types.ts)
+# Keys cover both the prefixed form (proxy path) and bare form (direct DeepSeek path)
 _PRICING = {
     "deepseek/deepseek-v4-flash": (0.023, 0.092),
+    "deepseek-v4-flash":          (0.023, 0.092),
     "deepseek/deepseek-v4-pro":   (0.115, 0.46),
+    "deepseek-v4-pro":            (0.115, 0.46),
     "deepseek/deepseek-reasoner": (0.115, 0.46),
+    "deepseek-reasoner":          (0.115, 0.46),
 }
 _DEFAULT_PRICE = (0.084, 0.336)
 
