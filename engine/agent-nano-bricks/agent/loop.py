@@ -166,6 +166,7 @@ def run_solo(
     last_response = ""
     consecutive_no_tool = 0
     verify_rounds = 0
+    did_work = False  # only self-review runs that actually used tools
     MAX_VERIFY = 2
 
     for step_i in range(step_offset, step_offset + max_steps):
@@ -289,6 +290,7 @@ def run_solo(
         # ── Tool execution ────────────────────────────────────────────────────
         if tool_calls_list:
             consecutive_no_tool = 0
+            did_work = True
             for tc in tool_calls_list:
                 fn_name = tc["function"]["name"]
                 try:
@@ -299,7 +301,10 @@ def run_solo(
                 arg_summary = ", ".join(f"{k}={str(v)[:80]}" for k, v in fn_args.items())
                 emit_tool_call(fn_name, arg_summary)
 
-                tool_context = {"client": client, "model": current_model, "caps": caps}
+                tool_context = {
+                    "client": client, "model": current_model, "caps": caps,
+                    "depth": caps.get("_subagent_depth", 0),
+                }
                 result = None
                 for attempt in range(MAX_TOOL_RETRIES):
                     result = dispatch_tool(workspace, fn_name, fn_args, tool_context)
@@ -333,7 +338,9 @@ def run_solo(
             or consecutive_no_tool >= 3
         )
         if wants_finish:
-            if verify_rounds >= MAX_VERIFY:
+            # Skip the review call for pure-chat answers (no tools used) — there
+            # are no files/actions to verify, so it would just waste a round-trip.
+            if not did_work or verify_rounds >= MAX_VERIFY:
                 break
             # Review own work against the goal before declaring done.
             emit_thinking("Reviewing my work against the goal…")

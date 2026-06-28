@@ -144,6 +144,8 @@ def append_file(workspace: Path, path: str, content: str) -> dict[str, Any]:
 def delete_file(workspace: Path, path: str) -> dict[str, Any]:
     try:
         target = _safe_path(workspace, path)
+        if target == workspace.resolve():
+            return {"ok": False, "error": "Refusing to delete the workspace root. Delete specific files/folders instead."}
         if not target.exists():
             return {"ok": False, "error": f"Not found: {path}"}
         if target.is_dir():
@@ -161,6 +163,8 @@ def move_file(workspace: Path, src: str, dst: str) -> dict[str, Any]:
     try:
         s = _safe_path(workspace, src)
         d = _safe_path(workspace, dst)
+        if s == workspace.resolve():
+            return {"ok": False, "error": "Refusing to move the workspace root."}
         if not s.exists():
             return {"ok": False, "error": f"Source not found: {src}"}
         d.parent.mkdir(parents=True, exist_ok=True)
@@ -489,10 +493,15 @@ def spawn_subagent(workspace: Path, goal: str, context: Optional[dict] = None) -
         return {"ok": False, "error": "spawn_subagent unavailable (no model context)."}
     if not goal.strip():
         return {"ok": False, "error": "goal is empty."}
+    # Depth guard — a sub-agent may not recursively spawn endless sub-agents.
+    depth = int(context.get("depth", 0))
+    if depth >= 2:
+        return {"ok": False, "error": "Max delegation depth reached — do this subtask yourself."}
     try:
         from agent.loop import run_solo  # lazy import to avoid circular dependency
         sub_caps = dict(context.get("caps", {}))
         sub_caps["max_steps"] = min(sub_caps.get("max_steps", 40), 40)  # keep subtasks bounded
+        sub_caps["_subagent_depth"] = depth + 1
         result = run_solo(
             goal, context["model"], workspace, context["client"], sub_caps,
             emit_identity=True, memory=None, skills=None,
