@@ -52,11 +52,16 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
     return () => document.removeEventListener('mousedown', handler);
   }, [folderMenuId]);
 
+  // NOTE: `q` MUST be declared before `sortedRuns` — the filter callback reads it.
+  // Previously `q` was declared after, causing a temporal-dead-zone ReferenceError
+  // the moment agentRuns became non-empty (i.e. right after the first agent run
+  // finished), which crashed the app and wiped history.
+  const q = search.toLowerCase().trim();
+
   const sortedRuns = [...agentRuns]
     .filter((r) => !q || r.query.toLowerCase().includes(q) || r.summary?.toLowerCase().includes(q))
     .sort((a, b) => b.createdAt - a.createdAt);
 
-  const q = search.toLowerCase().trim();
   const allConvs = [...conversations].sort((a, b) => {
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
