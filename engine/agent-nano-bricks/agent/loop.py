@@ -165,6 +165,8 @@ def run_solo(
 
     last_response = ""
     consecutive_no_tool = 0
+    verify_rounds = 0
+    MAX_VERIFY = 2
 
     for step_i in range(step_offset, step_offset + max_steps):
         step_idx = step_i - step_offset
@@ -297,9 +299,10 @@ def run_solo(
                 arg_summary = ", ".join(f"{k}={str(v)[:80]}" for k, v in fn_args.items())
                 emit_tool_call(fn_name, arg_summary)
 
+                tool_context = {"client": client, "model": current_model, "caps": caps}
                 result = None
                 for attempt in range(MAX_TOOL_RETRIES):
-                    result = dispatch_tool(workspace, fn_name, fn_args)
+                    result = dispatch_tool(workspace, fn_name, fn_args, tool_context)
                     if result.get("ok"):
                         break
                     if attempt < MAX_TOOL_RETRIES - 1:
@@ -319,16 +322,40 @@ def run_solo(
             emit_step(step_i, step_label, "ok")
             continue
 
-        # ── No tools → done check ─────────────────────────────────────────────
+        # ── No tools → done check + SELF-VERIFICATION ─────────────────────────
         emit_step(step_i, step_label, "ok")
         consecutive_no_tool += 1
 
         content_lower = content.lower()
-        if any(sig in content_lower for sig in _DONE_SIGNALS) or finish_reason == "stop":
-            break
-        if consecutive_no_tool >= 3:
-            emit_thinking("Task appears complete.")
-            break
+        wants_finish = (
+            any(sig in content_lower for sig in _DONE_SIGNALS)
+            or finish_reason == "stop"
+            or consecutive_no_tool >= 3
+        )
+        if wants_finish:
+            if verify_rounds >= MAX_VERIFY:
+                break
+            # Review own work against the goal before declaring done.
+            emit_thinking("Reviewing my work against the goal…")
+            verdict = _verify_work(client, current_model, query, last_response, workspace)
+            verify_rounds += 1
+            if verdict.get("complete", True):
+                emit_thinking("Review passed — task is complete.")
+                break
+            # Gaps found — feed them back and keep working.
+            missing = verdict.get("missing", "").strip()
+            emit_thinking(f"Review found gaps — fixing: {missing[:160]}")
+            messages.append({
+                "role": "user",
+                "content": (
+                    "A self-review found the task is NOT fully complete yet. "
+                    "Specifically still missing or incorrect:\n"
+                    f"{missing}\n\n"
+                    "Fix these issues completely using your tools, then finish."
+                ),
+            })
+            consecutive_no_tool = 0
+            continue
 
     # ── Final summary + LEARN (Hermes: closed learning loop) ──────────────────
     summary = last_response[:600] if last_response else "Task completed."
@@ -351,6 +378,49 @@ def run_solo(
         pass
 
     return result
+
+
+def _verify_work(client: OpenAI, model: str, query: str, last_response: str, workspace: Path) -> dict:
+    """Self-review: did the agent actually complete the task? Grounded in the
+    real files now in the workspace. Fail-open — a review error never blocks the
+    user from finishing."""
+    try:
+        files = []
+        for p in workspace.rglob("*"):
+            if p.is_file() and ".nanobricks_memory" not in p.parts:
+                files.append(str(p.relative_to(workspace)))
+            if len(files) >= 60:
+                break
+    except Exception:
+        files = []
+
+    prompt = (
+        "Review whether this task was GENUINELY and FULLY completed.\n\n"
+        f"TASK:\n{query}\n\n"
+        f"AGENT'S FINAL RESPONSE:\n{last_response[:1500]}\n\n"
+        f"FILES NOW IN WORKSPACE:\n{', '.join(files) if files else '(none)'}\n\n"
+        "Be strict but fair. If the task is fully done, output exactly {\"complete\": true}. "
+        "If something is missing, wrong, or incomplete, output "
+        "{\"complete\": false, \"missing\": \"<specific, actionable gaps>\"}. Output ONLY JSON."
+    )
+    try:
+        resp = _safe_create(
+            client, model,
+            [
+                {"role": "system", "content": "You are a strict completion reviewer. Output only JSON."},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=300,
+        )
+        text = resp.choices[0].message.content or ""
+        text = re.sub(r"```(?:json)?", "", text).strip()
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            data = json.loads(m.group())
+            return {"complete": bool(data.get("complete", True)), "missing": str(data.get("missing", ""))}
+    except Exception:
+        pass
+    return {"complete": True}
 
 
 def _safe_create(client: OpenAI, model: str, messages: list, max_tokens: int):
