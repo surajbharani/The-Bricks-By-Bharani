@@ -76,9 +76,12 @@ export const useAuth = create<AuthState>()((set, get) => ({
 
   devSignIn: () => {
     // Local dev bypass — no Supabase call, sets a synthetic session state.
-    // Persist a flag so the dev session survives reloads (e.g. the crash-recovery
-    // reload), otherwise the in-memory session is lost and the user is bounced to login.
-    try { localStorage.setItem('nano-bricks-dev', '1'); } catch { /* ignore */ }
+    // Persist a 30-day expiry so the dev session survives restarts/reloads.
+    // (Rolling window: each launch within 30 days refreshes it.)
+    try {
+      const expiry = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days
+      localStorage.setItem('nano-bricks-dev', String(expiry));
+    } catch { /* ignore */ }
     set({
       isDev: true,
       loading: false,
@@ -163,9 +166,19 @@ export const useAuth = create<AuthState>()((set, get) => ({
 }));
 
 // Bootstrap auth on import
-// 1. Restore a persisted dev session first (survives reloads).
+// 1. Restore a persisted dev session first (survives reloads), if not expired.
 const hadDevSession = (() => {
-  try { return localStorage.getItem('nano-bricks-dev') === '1'; } catch { return false; }
+  try {
+    const raw = localStorage.getItem('nano-bricks-dev');
+    if (!raw) return false;
+    if (raw === '1') return true; // legacy flag (no expiry) — still valid
+    const expiry = Number(raw);
+    if (Number.isFinite(expiry) && Date.now() < expiry) return true;
+    localStorage.removeItem('nano-bricks-dev'); // expired — clean up
+    return false;
+  } catch {
+    return false;
+  }
 })();
 
 if (hadDevSession) {

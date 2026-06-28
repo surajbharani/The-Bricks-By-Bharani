@@ -1,5 +1,8 @@
 import { Component, type ReactNode } from 'react';
 
+// NOTE: deliberately excludes 'nano-bricks-onboarding' (welcome tour) and
+// 'nano-bricks-dev' (dev login) and 'nano-bricks-auth' (Supabase session) so a
+// crash never re-shows the welcome popup or logs the user out.
 const STORE_KEYS = [
   'nano-bricks-run',
   'nano-bricks-history',
@@ -9,7 +12,6 @@ const STORE_KEYS = [
   'nano-bricks-memory',
   'nano-bricks-projects',
   'nano-bricks-scheduler',
-  'nano-bricks-onboarding',
 ];
 
 function clearAllStores() {
