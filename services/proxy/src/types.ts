@@ -52,8 +52,7 @@ export interface ChatRequest {
 
 // INR per 1K tokens (update when pricing changes)
 export const PRICING = {
-  'deepseek/deepseek-v4-flash':       { inputPer1K: 0.023, outputPer1K: 0.092 },
-  'deepseek/deepseek-v4-pro':         { inputPer1K: 0.115, outputPer1K: 0.46  },
+  'deepseek/deepseek-chat':           { inputPer1K: 0.023, outputPer1K: 0.092 },
   'deepseek/deepseek-reasoner':      { inputPer1K: 0.115, outputPer1K: 0.46  },
   default:                            { inputPer1K: 0.084, outputPer1K: 0.336 },
 } as const;

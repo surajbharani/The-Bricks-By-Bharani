@@ -6,8 +6,6 @@ import { useMemory } from '../store/useMemory';
 import { useTheme } from '../store/useTheme';
 import { ProjectPanel } from './ProjectPanel';
 import { SettingsModal } from './SettingsModal';
-import { ToolMarketplace } from './ToolMarketplace';
-import { SchedulerModal } from './SchedulerModal';
 
 interface SidebarProps {
   onOpenShortcuts?: () => void;
@@ -15,14 +13,12 @@ interface SidebarProps {
 
 export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
   const { conversationId, newConversation, loadConversation } = useSession();
-  const { conversations, agentRuns, deleteConversation, deleteAgentRun, updateConversationMeta, loadAgentRun } = useHistory();
+  const { conversations, agentRuns, deleteConversation, deleteAgentRun, updateConversationMeta } = useHistory();
   const { user, signOut } = useAuth();
   const { settings } = useMemory();
   const { sidebarWidth } = useTheme();
   const isCollapsed = sidebarWidth === 'collapsed';
   const [showSettings, setShowSettings] = useState(false);
-  const [showTools, setShowTools] = useState(false);
-  const [showScheduler, setShowScheduler] = useState(false);
   const [search, setSearch] = useState('');
   const [showArchived, setShowArchived] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -52,16 +48,9 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
     return () => document.removeEventListener('mousedown', handler);
   }, [folderMenuId]);
 
-  // NOTE: `q` MUST be declared before `sortedRuns` — the filter callback reads it.
-  // Previously `q` was declared after, causing a temporal-dead-zone ReferenceError
-  // the moment agentRuns became non-empty (i.e. right after the first agent run
-  // finished), which crashed the app and wiped history.
+  const sortedRuns = [...agentRuns].sort((a, b) => b.createdAt - a.createdAt);
+
   const q = search.toLowerCase().trim();
-
-  const sortedRuns = [...agentRuns]
-    .filter((r) => !q || r.query.toLowerCase().includes(q) || r.summary?.toLowerCase().includes(q))
-    .sort((a, b) => b.createdAt - a.createdAt);
-
   const allConvs = [...conversations].sort((a, b) => {
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
@@ -274,69 +263,24 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
           );
         })}
 
-        {/* Ungrouped chats — merged with agent runs in one chronological list */}
-        {(() => {
-          // Merge ungrouped chats + agent runs into one list sorted by time
-          const chatItems = ungrouped.map((c) => ({ type: 'chat' as const, ts: c.updatedAt, data: c }));
-          const agentItems = sortedRuns.map((r) => ({ type: 'agent' as const, ts: r.createdAt, data: r }));
-          const merged = [...chatItems, ...agentItems].sort((a, b) => b.ts - a.ts);
+        {/* Ungrouped chats */}
+        {ungrouped.length > 0 && (
+          <>
+            {folders.length > 0 && (
+              <p className="px-2 pt-1 pb-0.5 text-[9px] font-semibold uppercase tracking-widest text-text-lo opacity-60">
+                Chats
+              </p>
+            )}
+            <div className="space-y-0.5">{ungrouped.map(renderConv)}</div>
+          </>
+        )}
 
-          if (merged.length === 0 && folders.length === 0) {
-            return search
-              ? <p className="text-xs text-text-lo px-2 py-4 text-center opacity-50">No matches</p>
-              : <p className="text-xs text-text-lo px-2 py-4 text-center opacity-50">No history yet</p>;
-          }
-
-          return (
-            <div className="space-y-0.5">
-              {merged.map((item) => {
-                if (item.type === 'chat') {
-                  const conv = item.data as typeof ungrouped[0];
-                  return (
-                    <div key={`chat-${conv.id}`} className="relative">
-                      {renderConv(conv)}
-                      {!isCollapsed && (
-                        <span className="absolute top-1.5 right-7 text-[8px] font-semibold px-1 py-0.5 rounded bg-bg-elevated border border-border-hair text-text-lo opacity-70 pointer-events-none">
-                          Chat
-                        </span>
-                      )}
-                    </div>
-                  );
-                } else {
-                  const run = item.data as typeof sortedRuns[0];
-                  return (
-                    <div
-                      key={`agent-${run.id}`}
-                      className="group relative flex items-start gap-1.5 px-2.5 py-2 rounded-lg border border-red-core/10 hover:bg-bg-elevated hover:border-red-core/20 transition-colors cursor-pointer"
-                      onClick={() => loadAgentRun(run.id)}
-                    >
-                      <AgentIcon ok={run.status === 'done'} />
-                      {!isCollapsed && (
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            <span className="text-[8px] font-semibold px-1 py-0.5 rounded bg-red-core/15 border border-red-core/20 text-red-core">
-                              Agent
-                            </span>
-                          </div>
-                          <p className="text-xs text-text-hi truncate leading-snug">{run.query}</p>
-                          {run.summary && (
-                            <p className="text-[9px] text-text-lo truncate mt-0.5">{run.summary}</p>
-                          )}
-                          <p className="text-[9px] text-text-lo mt-0.5">
-                            {relativeTime(run.createdAt)} · {run.tokensUsed.toLocaleString()} tokens
-                          </p>
-                        </div>
-                      )}
-                      <ActionBtn title="Delete" onClick={(e) => { e.stopPropagation(); deleteAgentRun(run.id); }}>
-                        <TrashIcon />
-                      </ActionBtn>
-                    </div>
-                  );
-                }
-              })}
-            </div>
-          );
-        })()}
+        {activeConvs.length === 0 && !search && (
+          <p className="text-xs text-text-lo px-2 py-4 text-center opacity-50">No history yet</p>
+        )}
+        {activeConvs.length === 0 && search && (
+          <p className="text-xs text-text-lo px-2 py-4 text-center opacity-50">No matches</p>
+        )}
 
         {/* Archived section */}
         {archivedConvs.length > 0 && (
@@ -354,29 +298,39 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
             {showArchived && <div className="ml-2 space-y-0.5">{archivedConvs.map(renderConv)}</div>}
           </div>
         )}
+
+        {/* Agent runs */}
+        {sortedRuns.length > 0 && (
+          <>
+            <p className="px-2 pt-3 pb-1 text-[9px] font-semibold uppercase tracking-widest text-text-lo opacity-60">
+              Agent runs
+            </p>
+            {sortedRuns.map((run) => (
+              <div
+                key={run.id}
+                className="group relative flex items-start gap-1.5 px-2.5 py-2 rounded-lg border border-transparent hover:bg-bg-elevated transition-colors"
+              >
+                <AgentIcon ok={run.status === 'done'} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-text-hi truncate leading-snug">{run.query}</p>
+                  {run.summary && (
+                    <p className="text-[9px] text-text-lo truncate mt-0.5">{run.summary}</p>
+                  )}
+                  <p className="text-[9px] text-text-lo mt-0.5">
+                    {relativeTime(run.createdAt)} · {run.tokensUsed.toLocaleString()} tokens
+                  </p>
+                </div>
+                <ActionBtn title="Delete" onClick={(e) => { e.stopPropagation(); deleteAgentRun(run.id); }}>
+                  <TrashIcon />
+                </ActionBtn>
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
       {/* Footer */}
       <div className={`border-t border-border-hair ${isCollapsed ? 'px-1.5 py-3' : 'px-3 py-3'}`}>
-        {/* Tools + Scheduled quick actions */}
-        <div className={`flex flex-col gap-0.5 mb-2 ${isCollapsed ? 'items-center' : ''}`}>
-          <button
-            onClick={() => setShowTools(true)}
-            title="Tools"
-            className={`flex items-center gap-2.5 rounded-lg text-text-lo hover:text-text-hi hover:bg-bg-elevated transition-colors ${isCollapsed ? 'justify-center w-8 h-8' : 'px-2 py-1.5 w-full'}`}
-          >
-            <WrenchIcon />
-            {!isCollapsed && <span className="text-xs">Tools</span>}
-          </button>
-          <button
-            onClick={() => setShowScheduler(true)}
-            title="Scheduled"
-            className={`flex items-center gap-2.5 rounded-lg text-text-lo hover:text-text-hi hover:bg-bg-elevated transition-colors ${isCollapsed ? 'justify-center w-8 h-8' : 'px-2 py-1.5 w-full'}`}
-          >
-            <ClockIcon />
-            {!isCollapsed && <span className="text-xs">Scheduled</span>}
-          </button>
-        </div>
         <div className={`flex items-center gap-2 rounded-lg group ${isCollapsed ? 'justify-center px-1 py-1.5' : 'px-2 py-1.5'}`}>
           <div className="w-6 h-6 rounded-full bg-bg-elevated border border-border-hair flex items-center justify-center text-[10px] text-text-hi font-bold flex-shrink-0">
             {avatarLabel}
@@ -416,26 +370,7 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
       </div>
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-      <ToolMarketplace open={showTools} onClose={() => setShowTools(false)} />
-      <SchedulerModal open={showScheduler} onClose={() => setShowScheduler(false)} />
     </aside>
-  );
-}
-
-function WrenchIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-    </svg>
-  );
-}
-
-function ClockIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
-    </svg>
   );
 }
 
