@@ -1,7 +1,12 @@
-"""Tool implementations: file I/O, shell, web fetch, browser — sandboxed to workspace."""
+"""
+Agent Nano Bricks — Tool Executor
+Tools: read_file, write_file, list_dir, shell_exec, web_fetch, browser_action
+All tools are sandboxed to the agent workspace.
+"""
 import json
 import os
 import subprocess
+import time
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -21,15 +26,23 @@ def _safe_path(workspace: Path, rel_or_abs: str) -> Path:
     try:
         resolved.relative_to(workspace.resolve())
     except ValueError:
-        raise SandboxViolation(f"Path '{rel_or_abs}' is outside the workspace. Access denied.")
+        raise SandboxViolation(f"Path '{rel_or_abs}' is outside the workspace.")
     return resolved
 
 
-def read_file(workspace: Path, path: str) -> dict[str, Any]:
+# ── File Tools ────────────────────────────────────────────────────────────────
+
+def read_file(workspace: Path, path: str, offset: int = 0, limit: int = 0) -> dict[str, Any]:
     try:
         target = _safe_path(workspace, path)
         content = target.read_text(encoding="utf-8", errors="replace")
-        return {"ok": True, "content": content[:8000]}  # cap at 8K chars
+        if offset or limit:
+            lines = content.splitlines()
+            lines = lines[offset:offset + limit] if limit else lines[offset:]
+            content = "\n".join(lines)
+        if len(content) > 16000:
+            content = content[:16000] + f"\n...[truncated, {len(content)-16000} chars omitted]"
+        return {"ok": True, "content": content, "path": str(target)}
     except SandboxViolation as e:
         return {"ok": False, "error": str(e)}
     except FileNotFoundError:
@@ -51,6 +64,19 @@ def write_file(workspace: Path, path: str, content: str) -> dict[str, Any]:
         return {"ok": False, "error": str(e)}
 
 
+def append_file(workspace: Path, path: str, content: str) -> dict[str, Any]:
+    try:
+        target = _safe_path(workspace, path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "a", encoding="utf-8") as f:
+            f.write(content)
+        return {"ok": True, "path": str(target)}
+    except SandboxViolation as e:
+        return {"ok": False, "error": str(e)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def list_dir(workspace: Path, path: str = ".") -> dict[str, Any]:
     try:
         target = _safe_path(workspace, path)
@@ -58,22 +84,23 @@ def list_dir(workspace: Path, path: str = ".") -> dict[str, Any]:
             return {"ok": False, "error": f"Not a directory: {path}"}
         entries = []
         for item in sorted(target.iterdir()):
-            entries.append({
-                "name": item.name,
-                "type": "dir" if item.is_dir() else "file",
-                "size": item.stat().st_size if item.is_file() else None,
-            })
-        return {"ok": True, "entries": entries[:100]}
+            try:
+                size = item.stat().st_size if item.is_file() else None
+            except Exception:
+                size = None
+            entries.append({"name": item.name, "type": "dir" if item.is_dir() else "file", "size": size})
+        return {"ok": True, "entries": entries[:200]}
     except SandboxViolation as e:
         return {"ok": False, "error": str(e)}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
 
-def shell_exec(workspace: Path, command: str, timeout: int = 60) -> dict[str, Any]:
-    """Run a shell command inside workspace with strict timeout."""
+# ── Shell Tool ────────────────────────────────────────────────────────────────
+
+def shell_exec(workspace: Path, command: str, timeout: int = 120) -> dict[str, Any]:
+    """Execute a shell command inside the workspace."""
     try:
-        # Quick safety check: no ../ escapes in command
         if "../" in command or "..\\" in command:
             return {"ok": False, "error": "Path traversal in command is not allowed."}
         result = subprocess.run(
@@ -83,12 +110,15 @@ def shell_exec(workspace: Path, command: str, timeout: int = 60) -> dict[str, An
             capture_output=True,
             text=True,
             timeout=timeout,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         output = (result.stdout + result.stderr).strip()
+        if len(output) > 12000:
+            output = output[:12000] + f"\n...[truncated, {len(output)-12000} chars omitted]"
         return {
             "ok": result.returncode == 0,
             "returncode": result.returncode,
-            "output": output[:8000],
+            "output": output,
         }
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": f"Command timed out after {timeout}s."}
@@ -96,104 +126,96 @@ def shell_exec(workspace: Path, command: str, timeout: int = 60) -> dict[str, An
         return {"ok": False, "error": str(e)}
 
 
+# ── Web Tool ──────────────────────────────────────────────────────────────────
+
 def web_fetch(workspace: Path, url: str, method: str = "GET",
               headers: dict | None = None, body: str | None = None) -> dict[str, Any]:
-    """Fetch a URL and return the response body (text, capped at 32K chars).
-
-    Use this to: call REST APIs, fetch web pages, download JSON/text data.
-    For JavaScript-heavy sites or login flows, use browser_action instead.
-    """
+    """Fetch a URL. Returns response body capped at 40K chars."""
     try:
         req = urllib.request.Request(url, method=method.upper())
-        req.add_header("User-Agent", "Mozilla/5.0 (Agent Nano Bricks; compatible)")
-        req.add_header("Accept", "text/html,application/json,*/*")
+        req.add_header("User-Agent", "Mozilla/5.0 (Agent Nano Bricks/1.0; compatible)")
+        req.add_header("Accept", "text/html,application/json,*/*;q=0.9")
+        req.add_header("Accept-Language", "en-US,en;q=0.9")
         if headers:
             for k, v in headers.items():
-                req.add_header(k, v)
+                req.add_header(k, str(v))
         if body:
             req.data = body.encode("utf-8")
-            if "Content-Type" not in (headers or {}):
+            if not headers or "Content-Type" not in headers:
                 req.add_header("Content-Type", "application/json")
         with urllib.request.urlopen(req, timeout=30) as resp:
-            raw = resp.read(65536)  # read up to 64K bytes
+            raw = resp.read(81920)  # up to 80K bytes
             charset = "utf-8"
             ct = resp.headers.get("Content-Type", "")
             if "charset=" in ct:
                 charset = ct.split("charset=")[-1].split(";")[0].strip()
-            text = raw.decode(charset, errors="replace")
+            try:
+                text = raw.decode(charset, errors="replace")
+            except (LookupError, UnicodeDecodeError):
+                text = raw.decode("utf-8", errors="replace")
             return {
                 "ok": True,
                 "status": resp.status,
                 "url": resp.url,
-                "content": text[:32000],
+                "content": text[:40000],
             }
     except urllib.error.HTTPError as e:
-        body_text = e.read(4096).decode("utf-8", errors="replace") if e.fp else ""
-        return {"ok": False, "error": f"HTTP {e.code}: {e.reason}", "body": body_text}
+        body_bytes = b""
+        try:
+            body_bytes = e.read(4096)
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "error": f"HTTP {e.code}: {e.reason}",
+            "body": body_bytes.decode("utf-8", errors="replace"),
+        }
+    except urllib.error.URLError as e:
+        return {"ok": False, "error": f"URL error: {e.reason}"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
 
-def browser_action(workspace: Path, action: str, url: str = "",
-                   selector: str = "", value: str = "",
-                   script: str = "", screenshot_path: str = "") -> dict[str, Any]:
-    """Control a headless Chromium browser for JavaScript-heavy tasks.
+# ── Browser Tool ──────────────────────────────────────────────────────────────
 
-    actions:
-      navigate   — open a URL         (requires: url)
-      click      — click an element   (requires: selector)
-      fill       — type into a field  (requires: selector, value)
-      get_text   — extract text       (requires: selector, optional)
-      screenshot — save a PNG         (requires: screenshot_path, optional)
-      evaluate   — run JavaScript     (requires: script)
-      get_page   — return full HTML   (no extra args)
-
-    Runs a single-action Playwright Python script as a subprocess.
-    Requires: pip install playwright && playwright install chromium
-    Falls back gracefully with an error if Playwright is unavailable.
-    """
-    try:
-        # Build a self-contained Python script for this action
-        save_path = screenshot_path if screenshot_path else str(workspace / "screenshot.png")
-        script_code = f"""
-import sys
+_BROWSER_SCRIPT = '''
+import sys, json
 try:
     from playwright.sync_api import sync_playwright
 except ImportError:
-    print('{{"ok": false, "error": "Playwright not installed. Run: pip install playwright && playwright install chromium"}}')
+    print(json.dumps({{"ok": False, "error": "Playwright not installed. Run: pip install playwright && playwright install chromium"}}))
     sys.exit(0)
 
-import json
+action = {action}
+url = {url}
+selector = {selector}
+value = {value}
+script = {script}
+save_path = {save_path}
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True)
-    page = browser.new_page()
+    browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+    ctx = browser.new_context(viewport={{"width": 1280, "height": 800}})
+    page = ctx.new_page()
     result = {{"ok": True}}
-
-    action = {json.dumps(action)}
-    url = {json.dumps(url)}
-    selector = {json.dumps(selector)}
-    value = {json.dumps(value)}
-    script = {json.dumps(script)}
-    save_path = {json.dumps(save_path)}
-
     try:
         if action == "navigate":
-            page.goto(url, wait_until="networkidle", timeout=30000)
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_load_state("networkidle", timeout=10000)
             result["title"] = page.title()
             result["url"] = page.url
         elif action == "click":
-            page.locator(selector).first.click(timeout=10000)
+            page.locator(selector).first.click(timeout=15000)
             result["clicked"] = selector
         elif action == "fill":
-            page.locator(selector).first.fill(value, timeout=10000)
+            page.locator(selector).first.fill(value, timeout=15000)
             result["filled"] = selector
         elif action == "get_text":
             if selector:
                 text = page.locator(selector).first.inner_text(timeout=10000)
             else:
                 text = page.inner_text("body")
-            result["text"] = text[:8000]
+            result["text"] = text[:10000]
         elif action == "screenshot":
             page.screenshot(path=save_path, full_page=True)
             result["path"] = save_path
@@ -202,18 +224,33 @@ with sync_playwright() as p:
             result["value"] = str(ret)[:4000]
         elif action == "get_page":
             html = page.content()
-            result["html"] = html[:16000]
+            result["html"] = html[:20000]
         else:
             result = {{"ok": False, "error": f"Unknown action: {{action}}"}}
     except Exception as ex:
         result = {{"ok": False, "error": str(ex)}}
-
     browser.close()
     print(json.dumps(result))
-"""
+'''
+
+
+def browser_action(workspace: Path, action: str, url: str = "",
+                   selector: str = "", value: str = "",
+                   script: str = "", screenshot_path: str = "") -> dict[str, Any]:
+    """Control a headless Chromium browser for JS-heavy tasks."""
+    try:
+        save_path = screenshot_path if screenshot_path else str(workspace / "screenshot.png")
+        code = _BROWSER_SCRIPT.format(
+            action=json.dumps(action),
+            url=json.dumps(url),
+            selector=json.dumps(selector),
+            value=json.dumps(value),
+            script=json.dumps(script),
+            save_path=json.dumps(save_path),
+        )
         proc = subprocess.run(
-            ["python", "-c", script_code],
-            capture_output=True, text=True, timeout=60,
+            ["python3", "-c", code],
+            capture_output=True, text=True, timeout=90,
             cwd=str(workspace),
         )
         out = proc.stdout.strip()
@@ -223,25 +260,29 @@ with sync_playwright() as p:
             except json.JSONDecodeError:
                 return {"ok": True, "output": out[:4000]}
         if proc.returncode != 0:
-            return {"ok": False, "error": proc.stderr[:2000]}
+            err = proc.stderr.strip()
+            return {"ok": False, "error": err[:2000] if err else "Browser process failed."}
         return {"ok": True, "output": "(no output)"}
     except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "Browser action timed out after 60s."}
+        return {"ok": False, "error": "Browser action timed out after 90s."}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
 
-# Tool schema for the model
+# ── Tool Schemas ──────────────────────────────────────────────────────────────
+
 TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read the contents of a file in the workspace.",
+            "description": "Read a file from the workspace. Returns content up to 16K chars. Use offset/limit for large files.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path to the file"},
+                    "path": {"type": "string", "description": "File path relative to workspace"},
+                    "offset": {"type": "integer", "description": "Line number to start from (0-indexed, optional)"},
+                    "limit": {"type": "integer", "description": "Max lines to return (optional)"},
                 },
                 "required": ["path"],
             },
@@ -251,12 +292,27 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Write or overwrite a file in the workspace.",
+            "description": "Write or overwrite a file in the workspace. Creates parent directories automatically.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path to the file"},
-                    "content": {"type": "string", "description": "Full file content"},
+                    "path": {"type": "string", "description": "File path relative to workspace"},
+                    "content": {"type": "string", "description": "Complete file content to write"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "append_file",
+            "description": "Append content to an existing file without overwriting it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path relative to workspace"},
+                    "content": {"type": "string", "description": "Content to append"},
                 },
                 "required": ["path", "content"],
             },
@@ -266,11 +322,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "list_dir",
-            "description": "List files and directories in the workspace.",
+            "description": "List files and folders in a workspace directory.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Relative path (default: workspace root)"},
+                    "path": {"type": "string", "description": "Directory path (default: workspace root)"},
                 },
                 "required": [],
             },
@@ -281,14 +337,14 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "shell_exec",
             "description": (
-                "Execute a shell command inside the workspace (60s timeout). "
-                "Use for: running Python scripts, installing packages (pip install), "
-                "data processing, git operations, file transforms, and any CLI tool."
+                "Run a shell command in the workspace (120s timeout, 12K output cap). "
+                "Use for: Python/Node scripts, pip install, git, data processing, file transforms, CLI tools."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string", "description": "Shell command to run"},
+                    "command": {"type": "string", "description": "Shell command to execute"},
+                    "timeout": {"type": "integer", "description": "Timeout in seconds (default 120, max 300)"},
                 },
                 "required": ["command"],
             },
@@ -299,18 +355,21 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "web_fetch",
             "description": (
-                "Fetch a URL and return the response body. "
-                "Use for: calling REST APIs, downloading data, scraping static pages, "
-                "reading JSON feeds, checking websites. "
-                "For login/JavaScript-heavy sites use browser_action instead."
+                "Fetch a URL and return the response body (up to 40K chars). "
+                "Use for: REST APIs, JSON data, static HTML scraping, file downloads. "
+                "For login flows or JS-rendered pages, use browser_action instead."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "The URL to fetch"},
-                    "method": {"type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"], "description": "HTTP method (default GET)"},
-                    "headers": {"type": "object", "description": "Optional HTTP headers as key-value pairs"},
-                    "body": {"type": "string", "description": "Optional request body (for POST/PUT)"},
+                    "url": {"type": "string", "description": "URL to fetch"},
+                    "method": {
+                        "type": "string",
+                        "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"],
+                        "description": "HTTP method (default: GET)",
+                    },
+                    "headers": {"type": "object", "description": "HTTP headers as key-value pairs"},
+                    "body": {"type": "string", "description": "Request body for POST/PUT"},
                 },
                 "required": ["url"],
             },
@@ -321,10 +380,9 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "browser_action",
             "description": (
-                "Control a headless Chromium browser for JavaScript-heavy tasks. "
-                "Use for: logging into websites, filling forms, clicking buttons, "
-                "scraping dynamic content, taking screenshots, automating web workflows. "
-                "Requires Playwright: pip install playwright && playwright install chromium."
+                "Control a real Chromium browser (headless). "
+                "Use for: JavaScript-rendered sites, login flows, form submissions, screenshots, automation. "
+                "Requires: pip install playwright && playwright install chromium"
             ),
             "parameters": {
                 "type": "object",
@@ -332,13 +390,13 @@ TOOL_DEFINITIONS = [
                     "action": {
                         "type": "string",
                         "enum": ["navigate", "click", "fill", "get_text", "screenshot", "evaluate", "get_page"],
-                        "description": "What to do: navigate=open URL, click=click element, fill=type text, get_text=extract text, screenshot=save PNG, evaluate=run JS, get_page=return HTML",
+                        "description": "navigate=open URL | click=click element | fill=type into field | get_text=extract text | screenshot=save PNG | evaluate=run JS | get_page=return full HTML",
                     },
-                    "url": {"type": "string", "description": "URL to navigate to (for 'navigate')"},
-                    "selector": {"type": "string", "description": "CSS selector or XPath for element (for click/fill/get_text)"},
-                    "value": {"type": "string", "description": "Text to type (for 'fill')"},
-                    "script": {"type": "string", "description": "JavaScript to execute (for 'evaluate')"},
-                    "screenshot_path": {"type": "string", "description": "Where to save the screenshot (for 'screenshot', default: screenshot.png in workspace)"},
+                    "url": {"type": "string", "description": "URL to navigate to"},
+                    "selector": {"type": "string", "description": "CSS/XPath selector"},
+                    "value": {"type": "string", "description": "Text to type (for fill)"},
+                    "script": {"type": "string", "description": "JavaScript to run (for evaluate)"},
+                    "screenshot_path": {"type": "string", "description": "Where to save screenshot PNG"},
                 },
                 "required": ["action"],
             },
@@ -347,30 +405,30 @@ TOOL_DEFINITIONS = [
 ]
 
 
+# ── Dispatcher ────────────────────────────────────────────────────────────────
+
 def dispatch_tool(workspace: Path, name: str, args: dict) -> dict:
-    if name == "read_file":
-        return read_file(workspace, args.get("path", ""))
-    if name == "write_file":
-        return write_file(workspace, args.get("path", ""), args.get("content", ""))
-    if name == "list_dir":
-        return list_dir(workspace, args.get("path", "."))
-    if name == "shell_exec":
-        return shell_exec(workspace, args.get("command", ""))
-    if name == "web_fetch":
-        return web_fetch(
-            workspace, args.get("url", ""),
-            args.get("method", "GET"),
-            args.get("headers"),
-            args.get("body"),
-        )
-    if name == "browser_action":
-        return browser_action(
-            workspace,
-            args.get("action", ""),
-            args.get("url", ""),
-            args.get("selector", ""),
-            args.get("value", ""),
-            args.get("script", ""),
-            args.get("screenshot_path", ""),
-        )
-    return {"ok": False, "error": f"Unknown tool: {name}"}
+    try:
+        if name == "read_file":
+            return read_file(workspace, args["path"], args.get("offset", 0), args.get("limit", 0))
+        if name == "write_file":
+            return write_file(workspace, args["path"], args.get("content", ""))
+        if name == "append_file":
+            return append_file(workspace, args["path"], args.get("content", ""))
+        if name == "list_dir":
+            return list_dir(workspace, args.get("path", "."))
+        if name == "shell_exec":
+            timeout = min(int(args.get("timeout", 120)), 300)
+            return shell_exec(workspace, args["command"], timeout)
+        if name == "web_fetch":
+            return web_fetch(workspace, args["url"], args.get("method", "GET"),
+                             args.get("headers"), args.get("body"))
+        if name == "browser_action":
+            return browser_action(workspace, args["action"], args.get("url", ""),
+                                  args.get("selector", ""), args.get("value", ""),
+                                  args.get("script", ""), args.get("screenshot_path", ""))
+        return {"ok": False, "error": f"Unknown tool: {name}"}
+    except KeyError as e:
+        return {"ok": False, "error": f"Missing required argument: {e}"}
+    except Exception as e:
+        return {"ok": False, "error": f"Tool dispatch error: {e}"}

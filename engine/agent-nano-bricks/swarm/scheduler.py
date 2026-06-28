@@ -1,28 +1,25 @@
 """
-Swarm scheduler — ready-queue + ThreadPoolExecutor + dependency resolution.
+Swarm Scheduler — runs bricks in parallel using a dependency DAG.
 Each brick runs as an isolated Solo agent in its own workspace subfolder.
-Architecture derived from Hermes Agent (MIT, © Nous Research).
+Uses ThreadPoolExecutor for true parallelism.
 """
 import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from pathlib import Path
-from typing import Optional
-
 
 from openai import OpenAI
 
 from agent.events import emit_subagent, emit_thinking, emit_error
 from agent.loop import run_solo
-from providers.proxy import make_client, estimate_inr
+from providers.proxy import make_client
 
-MAX_CONCURRENCY = 4
+MAX_CONCURRENCY = 6
 
 
 def _compress_summary(result: dict) -> str:
-    """Short summary from a brick's run result."""
     s = result.get("summary", "")
-    return s[:300] + "…" if len(s) > 300 else s
+    return s[:400] + "…" if len(s) > 400 else s
 
 
 def run_swarm(
@@ -35,14 +32,15 @@ def run_swarm(
     client: OpenAI | None = None,
 ) -> dict:
     """
-    Run bricks in parallel, respecting dependency DAG.
+    Run bricks in parallel respecting the dependency DAG.
     Returns {ok, summary, tokens_used, inr}.
+    No spend ceiling — runs until all bricks complete.
     """
     max_concurrency = caps.get("max_concurrency", MAX_CONCURRENCY)
-    max_inr = caps.get("max_inr", 10.0)
 
+    # BRICK-01, BRICK-02, ... labels
     brick_names: dict[str, str] = {
-        b["id"]: f"BRICK-{str(i+1).zfill(2)}"
+        b["id"]: f"BRICK-{str(i + 1).zfill(2)}"
         for i, b in enumerate(bricks)
     }
 
@@ -53,33 +51,48 @@ def run_swarm(
     all_ok = True
 
     def brick_ready(brick: dict) -> bool:
-        return all(dep in completed for dep in brick["needs"])
+        return all(dep in completed for dep in brick.get("needs", []))
 
     def run_brick(brick: dict) -> None:
         nonlocal total_tokens, total_inr, all_ok
 
         agent_id = str(uuid.uuid4())[:8]
-        agent_name = brick_names.get(brick["id"], "Agent")
+        agent_name = brick_names.get(brick["id"], f"AGENT-{agent_id[:4].upper()}")
         brick_workspace = workspace / f"brick_{brick['id']}"
-        brick_caps = {**caps, "max_inr": max_inr / len(bricks)}  # split ₹ budget
+        brick_workspace.mkdir(parents=True, exist_ok=True)
+
+        # Pass per-brick caps (no spend ceiling)
+        brick_caps = {
+            **caps,
+            "max_steps": caps.get("max_steps", 60),
+        }
 
         emit_subagent(agent_id, brick["goal"], "spawned", name=agent_name)
 
-        # Build enriched query with dependency context
+        # Enrich query with dependency outputs
         dep_context = ""
-        if brick["needs"]:
-            dep_summaries = "\n".join(
-                f"- {dep}: {completed.get(dep, {}).get('summary', 'pending')}"
-                for dep in brick["needs"]
-            )
-            dep_context = f"\n\nContext from completed steps:\n{dep_summaries}"
+        if brick.get("needs"):
+            parts = []
+            for dep in brick["needs"]:
+                dep_result = completed.get(dep, {})
+                dep_summary = dep_result.get("summary", "(no output)")
+                dep_name = brick_names.get(dep, dep)
+                parts.append(f"[{dep_name}] {dep_summary}")
+            dep_context = "\n\nContext from completed parallel tasks:\n" + "\n".join(parts)
 
         enriched_query = brick["goal"] + dep_context
 
         emit_subagent(agent_id, brick["goal"], "working", name=agent_name)
 
         brick_client = client if client is not None else make_client(jwt)
-        result = run_solo(enriched_query, model, brick_workspace, brick_client, brick_caps, emit_identity=False)
+        try:
+            result = run_solo(
+                enriched_query, model, brick_workspace, brick_client,
+                brick_caps, emit_identity=False,
+            )
+        except Exception as e:
+            result = {"ok": False, "summary": f"Brick failed: {e}", "tokens_used": 0, "inr": 0.0}
+
         summary = _compress_summary(result)
 
         with lock:
@@ -91,32 +104,41 @@ def run_swarm(
 
         emit_subagent(agent_id, brick["goal"], "done", summary=summary, name=agent_name)
 
-    # ── Ready-queue scheduler ─────────────────────────────────────────────────
+    # ── DAG Scheduler ─────────────────────────────────────────────────────────
     remaining = list(bricks)
     futures: dict[str, Future] = {}
 
     with ThreadPoolExecutor(max_workers=max_concurrency) as pool:
-        while remaining or futures:
-            # Submit all newly-ready bricks
-            still_remaining = []
-            for brick in remaining:
-                if brick_ready(brick):
-                    if total_inr < max_inr:
-                        f = pool.submit(run_brick, brick)
-                        futures[brick["id"]] = f
-                    else:
-                        emit_error(f"Brick '{brick['id']}' skipped: spend ceiling reached.")
-                        with lock:
-                            completed[brick["id"]] = {"ok": False, "summary": "Skipped (spend cap)."}
-                else:
-                    still_remaining.append(brick)
-            remaining = still_remaining
+        # Initial submission: all bricks with no dependencies
+        still_waiting = []
+        for brick in remaining:
+            if brick_ready(brick):
+                futures[brick["id"]] = pool.submit(run_brick, brick)
+            else:
+                still_waiting.append(brick)
+        remaining = still_waiting
 
-            # Wait for any future to complete
-            done_ids = [bid for bid, f in futures.items() if f.done()]
-            for bid in done_ids:
+        while futures:
+            # Wait for any one future to complete
+            done_futures = {bid: f for bid, f in futures.items() if f.done()}
+
+            if not done_futures:
+                # Poll — brief sleep to avoid busy-loop
+                import time; time.sleep(0.05)
+                continue
+
+            for bid in list(done_futures.keys()):
                 futures.pop(bid)
-                # Re-evaluate ready bricks after completion
+                # Collect exception if any
+                try:
+                    done_futures[bid].result()
+                except Exception as e:
+                    with lock:
+                        if bid not in completed:
+                            completed[bid] = {"ok": False, "summary": f"Exception: {e}"}
+                        all_ok = False
+
+                # Re-evaluate which bricks are now unblocked
                 newly_ready = []
                 still_waiting = []
                 for brick in remaining:
@@ -125,28 +147,26 @@ def run_swarm(
                     else:
                         still_waiting.append(brick)
                 remaining = still_waiting
+
                 for brick in newly_ready:
-                    if total_inr < max_inr:
-                        f = pool.submit(run_brick, brick)
-                        futures[brick["id"]] = f
-                    else:
-                        with lock:
-                            completed[brick["id"]] = {"ok": False, "summary": "Skipped (spend cap)."}
+                    futures[brick["id"]] = pool.submit(run_brick, brick)
 
-            if not done_ids and futures:
-                # Brief yield to avoid busy-loop
-                import time; time.sleep(0.1)
+    # Mark any remaining bricks as skipped (dependency failed)
+    for brick in remaining:
+        if brick["id"] not in completed:
+            completed[brick["id"]] = {"ok": False, "summary": "Skipped (dependency failed)."}
+            all_ok = False
 
-    # ── Assemble summaries ────────────────────────────────────────────────────
-    assembled_parts = [
-        f"[{b['id']}] {b['goal']}: {completed.get(b['id'], {}).get('summary', 'not run')}"
+    # ── Assemble Final Summary ────────────────────────────────────────────────
+    parts = [
+        f"[{brick_names.get(b['id'], b['id'])}] {b['goal']}: {completed.get(b['id'], {}).get('summary', 'not run')}"
         for b in bricks
     ]
-    final_summary = "Swarm completed.\n" + "\n".join(assembled_parts)
+    final_summary = f"Swarm complete — {len(bricks)} bricks.\n" + "\n".join(parts)
 
     return {
         "ok": all_ok,
-        "summary": final_summary[:800],
+        "summary": final_summary[:1200],
         "tokens_used": total_tokens,
         "inr": total_inr,
     }

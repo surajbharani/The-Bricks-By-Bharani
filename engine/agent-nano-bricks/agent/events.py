@@ -5,10 +5,13 @@ from typing import Literal, Optional
 
 
 def _emit(event: dict) -> None:
-    print(json.dumps(event, ensure_ascii=False), flush=True)
+    try:
+        print(json.dumps(event, ensure_ascii=False), flush=True)
+    except Exception:
+        pass  # never crash on emit
 
 
-def emit_plan(steps: list[str]) -> None:
+def emit_plan(steps: list) -> None:
     _emit({"t": "plan", "steps": steps})
 
 
@@ -16,7 +19,7 @@ def emit_thinking(text: str) -> None:
     _emit({"t": "thinking", "text": text})
 
 
-def emit_step(i: int, label: str, status: Literal["run", "ok", "fail"]) -> None:
+def emit_step(i: int, label: str, status: str) -> None:
     _emit({"t": "step", "i": i, "label": label, "status": status})
 
 
@@ -28,7 +31,7 @@ def emit_tool_result(name: str, output_summary: str, ok: bool) -> None:
     _emit({"t": "tool_result", "name": name, "outputSummary": output_summary, "ok": ok})
 
 
-def emit_file(path: str, action: Literal["write", "edit"]) -> None:
+def emit_file(path: str, action: str) -> None:
     _emit({"t": "file", "path": path, "action": action})
 
 
@@ -39,7 +42,7 @@ def emit_token(text: str) -> None:
 def emit_subagent(
     agent_id: str,
     brick: str,
-    status: Literal["spawned", "working", "done"],
+    status: str,
     summary: Optional[str] = None,
     name: str = "",
 ) -> None:
