@@ -74,14 +74,20 @@ export function RunView() {
     <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-0">
       {/* Past conversation turns */}
       {completedTurns.map((turn, idx) => (
-        <div key={`turn-${idx}`} className="mb-4">
+        <div key={`turn-${idx}`} className="mb-6">
           <div className="flex justify-end mb-2">
             <div className="max-w-[75%] px-4 py-2.5 rounded-xl bg-red-core/15 border border-red-core/25">
               <p className="text-sm text-text-hi whitespace-pre-wrap">{turn.query}</p>
             </div>
           </div>
-          <div className="p-4 rounded-xl bg-bg-panel border border-border-hair">
-            <p className="text-sm text-text-hi whitespace-pre-wrap leading-relaxed">{turn.response}</p>
+          <div className="rounded-xl border border-border-hair overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-border-hair bg-bg-elevated/50">
+              <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+              <span className="text-[10px] font-mono text-text-lo uppercase tracking-widest">Task Complete</span>
+            </div>
+            <div className="p-4 bg-bg-panel">
+              <p className="text-sm text-text-hi whitespace-pre-wrap leading-relaxed">{turn.response}</p>
+            </div>
           </div>
         </div>
       ))}

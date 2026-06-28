@@ -56,13 +56,6 @@ export function TimelineNode({ step, isLast, index }: Props) {
         >
           <span style={{ fontSize: icon.length > 1 ? '13px' : '10px' }}>{icon}</span>
 
-          {/* Step number badge */}
-          <span
-            className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold"
-            style={{ background: color, color: '#fff' }}
-          >
-            {index + 1}
-          </span>
         </motion.div>
 
         {!isLast && (

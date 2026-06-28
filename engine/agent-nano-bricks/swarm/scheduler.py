@@ -3,23 +3,12 @@ Swarm scheduler — ready-queue + ThreadPoolExecutor + dependency resolution.
 Each brick runs as an isolated Solo agent in its own workspace subfolder.
 Architecture derived from Hermes Agent (MIT, © Nous Research).
 """
-import random
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, Future
 from pathlib import Path
 from typing import Optional
 
-_FEMALE_NAMES = [
-    "Ananya", "Priya", "Kavya", "Divya", "Shreya", "Meera", "Aditi",
-    "Siya", "Tanvi", "Riya", "Nandini", "Avni", "Diya", "Vrinda",
-    "Saanvi", "Navya", "Aanya", "Ishita", "Kyara", "Aisha",
-]
-_MALE_NAMES = [
-    "Arjun", "Vikram", "Rohan", "Aditya", "Dhruv", "Pranav", "Siddharth",
-    "Veer", "Kabir", "Ishan", "Dev", "Yash", "Raj", "Param", "Shaurya",
-    "Aarav", "Rehan", "Kiran", "Advait", "Nihal",
-]
 
 from openai import OpenAI
 
@@ -52,11 +41,8 @@ def run_swarm(
     max_concurrency = caps.get("max_concurrency", MAX_CONCURRENCY)
     max_inr = caps.get("max_inr", 10.0)
 
-    # Assign Indian names — female pool for simple tasks (≤2 bricks), male for complex
-    name_pool = _FEMALE_NAMES if len(bricks) <= 2 else _MALE_NAMES
-    shuffled_names = random.sample(name_pool, min(len(bricks), len(name_pool)))
     brick_names: dict[str, str] = {
-        b["id"]: shuffled_names[i % len(shuffled_names)]
+        b["id"]: f"BRICK-{str(i+1).zfill(2)}"
         for i, b in enumerate(bricks)
     }
 

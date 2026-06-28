@@ -22,11 +22,7 @@ from agent.events import (
 from tools.executor import TOOL_DEFINITIONS, dispatch_tool
 from providers.proxy import estimate_inr
 
-_SOLO_NAMES = [
-    "Ananya", "Priya", "Kavya", "Divya", "Shreya", "Meera", "Aditi",
-    "Siya", "Tanvi", "Riya", "Nandini", "Avni", "Diya", "Vrinda",
-    "Saanvi", "Navya", "Aanya", "Ishita", "Kyara", "Aisha",
-]
+_AGENT_LABELS = ["AGENT", "CORE", "UNIT", "NODE", "EXEC", "PROC", "TASK", "WORK"]
 
 MAX_STEPS = 20
 MAX_TOOL_RETRIES = 2
@@ -98,9 +94,8 @@ def run_solo(
     workspace = workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=True)
 
-    # Emit solo agent identity with a random Indian female name (skip when called from swarm)
     solo_id = str(uuid.uuid4())[:8]
-    solo_name = random.choice(_SOLO_NAMES)
+    solo_name = f"AGENT-{solo_id[:4].upper()}"
     if emit_identity:
         emit_subagent(solo_id, query[:80], "spawned", name=solo_name)
 

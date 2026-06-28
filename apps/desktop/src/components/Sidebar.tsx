@@ -13,7 +13,7 @@ interface SidebarProps {
 
 export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
   const { conversationId, newConversation, loadConversation } = useSession();
-  const { conversations, agentRuns, deleteConversation, deleteAgentRun, updateConversationMeta } = useHistory();
+  const { conversations, agentRuns, deleteConversation, deleteAgentRun, updateConversationMeta, loadAgentRun } = useHistory();
   const { user, signOut } = useAuth();
   const { settings } = useMemory();
   const { sidebarWidth } = useTheme();
@@ -308,7 +308,8 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
             {sortedRuns.map((run) => (
               <div
                 key={run.id}
-                className="group relative flex items-start gap-1.5 px-2.5 py-2 rounded-lg border border-transparent hover:bg-bg-elevated transition-colors"
+                className="group relative flex items-start gap-1.5 px-2.5 py-2 rounded-lg border border-transparent hover:bg-bg-elevated hover:border-red-core/20 transition-colors cursor-pointer"
+                onClick={() => loadAgentRun(run.id)}
               >
                 <AgentIcon ok={run.status === 'done'} />
                 <div className="flex-1 min-w-0">
