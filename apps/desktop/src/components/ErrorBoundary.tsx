@@ -49,8 +49,22 @@ export class ErrorBoundary extends Component<Props, State> {
     }
   }
 
-  componentDidCatch(error: Error) {
+  componentDidCatch(error: Error, info: { componentStack?: string }) {
     console.error('[ErrorBoundary] Render crash:', error);
+    // Persist the exact error so the real root cause is never a guess again.
+    // Survives the recovery reload; surfaced in Settings → About / support.
+    try {
+      localStorage.setItem(
+        'nano-bricks-last-crash',
+        JSON.stringify({
+          message: error?.message ?? String(error),
+          stack: error?.stack ?? '',
+          componentStack: info?.componentStack ?? '',
+          at: new Date().toISOString(),
+        })
+      );
+    } catch { /* ignore */ }
+
     const attempt = getAttempt();
 
     if (attempt === 0) {
@@ -112,6 +126,12 @@ export class ErrorBoundary extends Component<Props, State> {
           >
             Clear data &amp; restart
           </button>
+          {this.state.error?.message && (
+            <p style={{ color: '#4b5563', fontSize: 11, fontFamily: 'monospace', margin: 0,
+              maxWidth: 420, wordBreak: 'break-word' }}>
+              {this.state.error.message}
+            </p>
+          )}
         </div>
       );
     }
