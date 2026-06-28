@@ -64,3 +64,16 @@ def emit_done(ok: bool, summary: str, tokens_used: int) -> None:
 
 def emit_error(message: str) -> None:
     _emit({"t": "error", "message": message})
+
+
+def emit_checkpoint(checkpoint_id: str, label: str = "") -> None:
+    """A restore point was created — the dashboard can offer a one-click Undo."""
+    _emit({"t": "checkpoint", "id": checkpoint_id, "label": label})
+
+
+def emit_ask(ask_id: str, question: str, kind: str = "question", options: Optional[list] = None) -> None:
+    """Pause and ask the user. kind = 'question' | 'approval'."""
+    ev: dict = {"t": "ask", "id": ask_id, "question": question, "kind": kind}
+    if options:
+        ev["options"] = options
+    _emit(ev)

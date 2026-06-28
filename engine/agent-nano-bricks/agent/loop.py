@@ -95,6 +95,7 @@ def run_solo(
     emit_identity: bool = True,
     memory=None,
     skills=None,
+    checkpoint=None,
 ) -> dict:
     """Run a solo agent loop with the full capability set.
     Returns {ok, summary, tokens_used, inr}."""
@@ -169,10 +170,28 @@ def run_solo(
     did_work = False  # only self-review runs that actually used tools
     MAX_VERIFY = 2
 
+    # Goal pinning — re-inject the original task so it never drifts out of
+    # attention on long runs ("lost in the middle").
+    PIN_EVERY = 8
+    # Stuck detection — if the same tool call repeats and keeps failing, the
+    # agent is looping; force a strategy change instead of spinning.
+    recent_sigs: list[str] = []
+
     for step_i in range(step_offset, step_offset + max_steps):
         step_idx = step_i - step_offset
         step_label = steps[step_idx] if step_idx < len(steps) else f"Step {step_i + 1}"
         emit_step(step_i, step_label, "run")
+
+        # ── Goal pinning — keep the original task in attention on long runs ────
+        if step_idx > 0 and step_idx % PIN_EVERY == 0:
+            messages.append({
+                "role": "user",
+                "content": (
+                    "REMINDER — stay on the original task and its constraints:\n"
+                    f"{query}\n"
+                    "Do not drift. Finish exactly what was asked."
+                ),
+            })
 
         # ── Proactive context compression (Hermes: never overflow) ────────────
         try:
@@ -304,6 +323,7 @@ def run_solo(
                 tool_context = {
                     "client": client, "model": current_model, "caps": caps,
                     "depth": caps.get("_subagent_depth", 0),
+                    "checkpoint": checkpoint,
                 }
                 result = None
                 for attempt in range(MAX_TOOL_RETRIES):
@@ -315,8 +335,24 @@ def run_solo(
 
                 emit_tool_result(fn_name, _summarize_result(result), result.get("ok", False))
 
-                if fn_name == "write_file" and result.get("ok"):
-                    emit_file(result.get("path", fn_args.get("path", "")), result.get("action", "write"))
+                if fn_name in ("write_file", "edit_file", "multi_edit") and result.get("ok"):
+                    emit_file(result.get("path", fn_args.get("path", "")), result.get("action", "edit"))
+
+                # ── Stuck/loop detection — same failing call over and over ──────
+                sig = f"{fn_name}:{tc['function']['arguments']}"
+                if not result.get("ok"):
+                    recent_sigs.append(sig)
+                    if recent_sigs.count(sig) >= 3:
+                        emit_thinking("Detected a repeating failed action — changing strategy.")
+                        result = dict(result)
+                        result["_loop_warning"] = (
+                            "You have tried this exact action 3 times and it keeps failing. "
+                            "STOP repeating it. Try a fundamentally different approach, or if it is "
+                            "truly impossible, say so clearly instead of retrying."
+                        )
+                        recent_sigs.clear()
+                else:
+                    recent_sigs.clear()
 
                 messages.append({
                     "role": "tool",
@@ -406,8 +442,11 @@ def _verify_work(client: OpenAI, model: str, query: str, last_response: str, wor
         f"TASK:\n{query}\n\n"
         f"AGENT'S FINAL RESPONSE:\n{last_response[:1500]}\n\n"
         f"FILES NOW IN WORKSPACE:\n{', '.join(files) if files else '(none)'}\n\n"
-        "Be strict but fair. If the task is fully done, output exactly {\"complete\": true}. "
-        "If something is missing, wrong, or incomplete, output "
+        "Be strict. Do NOT accept a claim of success without evidence — check the "
+        "files actually exist and contain what the task required. Agents often falsely "
+        "claim completion to end the loop; catch that. If the task is genuinely and "
+        "fully done with real evidence, output exactly {\"complete\": true}. If anything "
+        "is missing, wrong, unproven, or only claimed-but-not-done, output "
         "{\"complete\": false, \"missing\": \"<specific, actionable gaps>\"}. Output ONLY JSON."
     )
     try:

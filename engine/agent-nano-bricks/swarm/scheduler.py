@@ -30,6 +30,7 @@ def run_swarm(
     jwt: str,
     caps: dict,
     client: OpenAI | None = None,
+    checkpoint=None,
 ) -> dict:
     """
     Run bricks in parallel respecting the dependency DAG.
@@ -88,7 +89,7 @@ def run_swarm(
         try:
             result = run_solo(
                 enriched_query, model, brick_workspace, brick_client,
-                brick_caps, emit_identity=False,
+                brick_caps, emit_identity=False, checkpoint=checkpoint,
             )
         except Exception as e:
             result = {"ok": False, "summary": f"Brick failed: {e}", "tokens_used": 0, "inr": 0.0}

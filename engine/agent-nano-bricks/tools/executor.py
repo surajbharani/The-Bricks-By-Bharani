@@ -37,7 +37,8 @@ def _safe_path(workspace: Path, rel_or_abs: str) -> Path:
     return resolved
 
 
-_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".nanobricks_memory"}
+_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build",
+              ".nanobricks_memory", ".nanobricks_checkpoints"}
 _BINARY_EXT = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".exe", ".bin", ".so", ".dll", ".woff", ".ico", ".mp4", ".mp3"}
 
 
@@ -569,22 +570,39 @@ TOOL_DEFINITIONS = [
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
 def dispatch_tool(workspace: Path, name: str, args: dict, context: Optional[dict] = None) -> dict:
+    # Checkpoint: back up anything we're about to change/delete so the run is undoable.
+    ckpt = context.get("checkpoint") if context else None
+
+    def _bk(path: str) -> None:
+        if ckpt and path:
+            try:
+                ckpt.backup(_safe_path(workspace, path))
+            except Exception:
+                pass
+
     try:
         if name == "read_file":
             return read_file(workspace, args["path"], args.get("offset", 0), args.get("limit", 0))
         if name == "write_file":
+            _bk(args["path"])
             return write_file(workspace, args["path"], args.get("content", ""))
         if name == "edit_file":
+            _bk(args["path"])
             return edit_file(workspace, args["path"], args["old_string"], args.get("new_string", ""), args.get("replace_all", False))
         if name == "multi_edit":
+            _bk(args["path"])
             return multi_edit(workspace, args["path"], args.get("edits", []))
         if name == "append_file":
+            _bk(args["path"])
             return append_file(workspace, args["path"], args.get("content", ""))
         if name == "delete_file":
+            _bk(args["path"])
             return delete_file(workspace, args["path"])
         if name == "move_file":
+            _bk(args["src"]); _bk(args["dst"])
             return move_file(workspace, args["src"], args["dst"])
         if name == "copy_file":
+            _bk(args["dst"])
             return copy_file(workspace, args["src"], args["dst"])
         if name == "make_dir":
             return make_dir(workspace, args["path"])

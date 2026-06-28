@@ -70,6 +70,19 @@ def main() -> None:
     openrouter_key = req.get("openrouter_key", "")
     deepseek_key   = req.get("deepseek_key", "")
     caps           = req.get("caps", {})
+    action         = req.get("action", "run")
+
+    # ── Undo: restore the workspace to before the last (or given) run ─────────
+    if action == "undo":
+        from agent.checkpoint import restore_checkpoint
+        workspace.mkdir(parents=True, exist_ok=True)
+        res = restore_checkpoint(workspace, req.get("checkpoint", ""))
+        if res.get("ok"):
+            from agent.events import emit_done
+            emit_done(True, f"Undone — restored {res.get('restored',0)} file(s), removed {res.get('removed',0)} new file(s).", 0)
+        else:
+            _emit_error(res.get("error", "Undo failed."))
+        return
 
     # Apply defaults to caps
     caps.setdefault("max_steps", 60)
@@ -119,11 +132,27 @@ def main() -> None:
         memory = None
         skills = None
 
+    # ── Checkpoint: make this whole run undoable ──────────────────────────────
+    checkpoint = None
+    try:
+        from agent.checkpoint import Checkpointer
+        checkpoint = Checkpointer(workspace)
+    except Exception:
+        checkpoint = None
+
     # ── Dispatch ──────────────────────────────────────────────────────────────
     if mode == "swarm":
-        _run_swarm(query, model, workspace, jwt, client, caps, memory, skills)
+        _run_swarm(query, model, workspace, jwt, client, caps, memory, skills, checkpoint)
     else:
-        _run_solo(query, model, workspace, client, caps, memory, skills)
+        _run_solo(query, model, workspace, client, caps, memory, skills, checkpoint)
+
+    # ── Finalize checkpoint → offer Undo if anything changed ──────────────────
+    try:
+        if checkpoint is not None and checkpoint.finalize():
+            from agent.events import emit_checkpoint
+            emit_checkpoint(checkpoint.id, "Undo this task")
+    except Exception:
+        pass
 
     # ── Record a session summary so the next session remembers this one ───────
     try:
@@ -134,16 +163,16 @@ def main() -> None:
         pass
 
 
-def _run_solo(query, model, workspace, client, caps, memory=None, skills=None):
+def _run_solo(query, model, workspace, client, caps, memory=None, skills=None, checkpoint=None):
     from agent.loop import run_solo
     try:
         run_solo(query, model, workspace, client, caps,
-                 emit_identity=True, memory=memory, skills=skills)
+                 emit_identity=True, memory=memory, skills=skills, checkpoint=checkpoint)
     except Exception as e:
         _emit_error(f"Agent error: {e}")
 
 
-def _run_swarm(query, model, workspace, jwt, client, caps, memory=None, skills=None):
+def _run_swarm(query, model, workspace, jwt, client, caps, memory=None, skills=None, checkpoint=None):
     from swarm.decompose import decompose
     from swarm.scheduler import run_swarm
     from agent.events import emit_thinking
@@ -159,7 +188,7 @@ def _run_swarm(query, model, workspace, jwt, client, caps, memory=None, skills=N
 
     emit_thinking(f"Spawning {len(bricks)} parallel agents…")
     try:
-        result = run_swarm(query, bricks, model, workspace, jwt, caps, client=client)
+        result = run_swarm(query, bricks, model, workspace, jwt, caps, client=client, checkpoint=checkpoint)
         # Learn from the overall swarm outcome at the top level.
         try:
             if memory is not None and result:
