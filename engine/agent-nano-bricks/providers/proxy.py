@@ -3,6 +3,7 @@ from openai import OpenAI
 
 PROXY_BASE_URL = "https://api.nanobricks.app/v1"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 
 # INR per 1K tokens (mirrors services/proxy/src/types.ts)
 _PRICING = {
@@ -19,9 +20,10 @@ def estimate_inr(model: str, prompt_tokens: int, completion_tokens: int) -> floa
 
 
 def normalize_model(model: str) -> str:
-    """Strip leading 'openrouter/' prefix that OpenRouter itself doesn't expect."""
-    if model.startswith("openrouter/"):
-        return model[len("openrouter/"):]
+    """Strip provider prefix so upstream APIs receive the bare model name."""
+    for prefix in ("openrouter/", "deepseek/"):
+        if model.startswith(prefix):
+            return model[len(prefix):]
     return model
 
 
@@ -30,6 +32,16 @@ def make_client(jwt: str) -> OpenAI:
         base_url=PROXY_BASE_URL,
         api_key=jwt,  # Supabase JWT as Bearer token
         default_headers={"Authorization": f"Bearer {jwt}"},
+        max_retries=2,
+        timeout=120.0,
+    )
+
+
+def make_deepseek_client(api_key: str) -> OpenAI:
+    return OpenAI(
+        base_url=DEEPSEEK_BASE_URL,
+        api_key=api_key,
+        default_headers={"Authorization": f"Bearer {api_key}"},
         max_retries=2,
         timeout=120.0,
     )

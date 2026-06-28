@@ -3,7 +3,9 @@ import { useAuth } from '../store/useAuth';
 
 const PROXY_URL = import.meta.env.VITE_PROXY_URL || 'https://api.nanobricks.app';
 const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_KEY as string | undefined;
+const DEEPSEEK_KEY = import.meta.env.VITE_DEEPSEEK_KEY as string | undefined;
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const DEEPSEEK_URL = 'https://api.deepseek.com/v1/chat/completions';
 
 export type ContentBlock =
   | { type: 'text'; text: string }
@@ -66,6 +68,11 @@ export async function* streamChat(req: ChatRequest): AsyncGenerator<StreamChunk>
     return;
   }
 
+  if (DEEPSEEK_KEY && req.model.startsWith('deepseek/')) {
+    yield* streamDeepSeek(req, signal);
+    return;
+  }
+
   if (OPENROUTER_KEY && req.model.startsWith('openrouter/')) {
     yield* streamOpenRouter(req, signal);
     return;
@@ -112,6 +119,26 @@ async function* streamOpenRouter(req: ChatRequest, signal?: AbortSignal): AsyncG
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error?.message ?? `OpenRouter error ${res.status}`);
+  }
+
+  yield* readSSEStream(res, signal);
+}
+
+async function* streamDeepSeek(req: ChatRequest, signal?: AbortSignal): AsyncGenerator<StreamChunk> {
+  const model = req.model.startsWith('deepseek/') ? req.model.slice('deepseek/'.length) : req.model;
+  const res = await fetch(DEEPSEEK_URL, {
+    method: 'POST',
+    signal,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${DEEPSEEK_KEY}`,
+    },
+    body: JSON.stringify({ model, messages: req.messages, stream: true }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error?.message ?? `DeepSeek error ${res.status}`);
   }
 
   yield* readSSEStream(res, signal);

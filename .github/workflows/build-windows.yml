@@ -71,6 +71,7 @@ jobs:
         working-directory: apps/desktop
         env:
           VITE_OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
+          VITE_DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_KEY }}
           VITE_GOOGLE_SEARCH_KEY: ${{ secrets.GOOGLE_SEARCH_KEY }}
           VITE_GOOGLE_SEARCH_CX: ${{ secrets.GOOGLE_SEARCH_CX }}
           VITE_YOUTUBE_KEY: ${{ secrets.YOUTUBE_KEY }}
@@ -95,6 +96,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_OPENROUTER_KEY: ${{ secrets.OPENROUTER_KEY }}
+          VITE_DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_KEY }}
           VITE_GOOGLE_SEARCH_KEY: ${{ secrets.GOOGLE_SEARCH_KEY }}
           VITE_GOOGLE_SEARCH_CX: ${{ secrets.GOOGLE_SEARCH_CX }}
           VITE_YOUTUBE_KEY: ${{ secrets.YOUTUBE_KEY }}

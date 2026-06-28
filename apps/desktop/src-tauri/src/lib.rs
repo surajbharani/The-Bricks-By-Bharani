@@ -11,6 +11,7 @@ pub struct AgentRunRequest {
     pub workspace: Option<String>,
     pub token: String,
     pub openrouter_key: Option<String>,
+    pub deepseek_key: Option<String>,
     pub caps: serde_json::Value,
 }
 
@@ -33,6 +34,7 @@ async fn agent_run(app: AppHandle, request: AgentRunRequest) -> Result<(), Strin
         "workspace":      workspace.to_string_lossy(),
         "token":          request.token,
         "openrouter_key": request.openrouter_key.unwrap_or_default(),
+        "deepseek_key":   request.deepseek_key.unwrap_or_default(),
         "caps":           request.caps,
     })
     .to_string();

@@ -53,26 +53,31 @@ def main() -> None:
     workspace      = Path(req.get("workspace", str(Path.home() / "Documents" / "Nano Bricks")))
     jwt            = req.get("token", "")
     openrouter_key = req.get("openrouter_key", "")
+    deepseek_key   = req.get("deepseek_key", "")
     caps           = req.get("caps", {})
 
     if not query:
         _emit_error("Query is empty. Please provide a task.")
         return
 
-    # Determine if we should use OpenRouter directly
+    # Determine routing: DeepSeek direct > OpenRouter direct > proxy
+    use_deepseek   = bool(deepseek_key) and model.startswith("deepseek/")
     use_openrouter = bool(openrouter_key) and (
         model.startswith("openrouter/") or not jwt or jwt == "dev-token"
     )
 
-    if not use_openrouter and not jwt:
+    if not use_deepseek and not use_openrouter and not jwt:
         _emit_error("No auth token provided. Please sign in to Nano Bricks.")
         return
 
     # Default workspace: Documents/Nano Bricks
     workspace.mkdir(parents=True, exist_ok=True)
 
-    from providers.proxy import make_client, make_openrouter_client, normalize_model
-    if use_openrouter:
+    from providers.proxy import make_client, make_openrouter_client, make_deepseek_client, normalize_model
+    if use_deepseek:
+        client = make_deepseek_client(deepseek_key)
+        model = normalize_model(model)  # strip deepseek/ prefix for upstream
+    elif use_openrouter:
         client = make_openrouter_client(openrouter_key)
         model = normalize_model(model)
     else:

@@ -62,6 +62,7 @@ export function AgentComposer() {
 
     const jwt = session?.access_token ?? '';
     const openrouterKey = (import.meta.env.VITE_OPENROUTER_KEY as string | undefined) ?? '';
+    const deepseekKey = (import.meta.env.VITE_DEEPSEEK_KEY as string | undefined) ?? '';
 
     // Listen for agent-event Tauri events. The completed turn is appended to
     // agentHistory atomically inside applyEvent() on the 'done'/'error' event.
@@ -84,6 +85,7 @@ export function AgentComposer() {
           workspace: null,
           token: jwt,
           openrouter_key: openrouterKey,
+          deepseek_key: deepseekKey,
           caps: { max_steps: 20, max_concurrency: 4, max_inr: 50.0 },
         },
       });
