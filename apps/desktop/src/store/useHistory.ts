@@ -24,6 +24,7 @@ export interface AgentRunRecord {
   status: 'done' | 'error';
   tokensUsed: number;
   model: string;
+  agentCount?: number;
   createdAt: number;
 }
 
@@ -38,6 +39,7 @@ interface HistoryState {
   deleteConversation: (id: string) => void;
   saveAgentRun: (run: Omit<AgentRunRecord, 'id' | 'createdAt'>) => void;
   deleteAgentRun: (id: string) => void;
+  loadAgentRun: (id: string) => void;
   clearAll: () => void;
 }
 
@@ -84,6 +86,25 @@ export const useHistory = create<HistoryState>()(
 
       deleteAgentRun: (id) =>
         set((s) => ({ agentRuns: s.agentRuns.filter((r) => r.id !== id) })),
+
+      loadAgentRun: (id) => {
+        const run = useHistory.getState().agentRuns.find((r) => r.id === id);
+        if (!run) return;
+        // Lazy imports to avoid circular deps (useSession imports useHistory)
+        Promise.resolve().then(async () => {
+          const { useSession } = await import('./useSession');
+          const { useRun } = await import('./useRun');
+          useSession.getState().setMode('agent');
+          useRun.setState((s) => ({
+            ...s,
+            status: 'done',
+            query: run.query,
+            summary: run.summary,
+            tokensUsed: run.tokensUsed,
+            agentHistory: [{ query: run.query, response: run.summary }],
+          }));
+        });
+      },
 
       clearAll: () => set({ conversations: [], agentRuns: [] }),
     }),

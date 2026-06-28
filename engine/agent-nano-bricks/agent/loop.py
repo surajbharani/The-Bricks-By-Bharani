@@ -5,7 +5,9 @@ Architecture derived from Hermes Agent (MIT, © Nous Research).
 See NOTICE.md and THIRD_PARTY_LICENSES/ for attribution.
 """
 import json
+import random
 import re
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -15,9 +17,16 @@ from openai.types.chat import ChatCompletionMessage
 from agent.events import (
     emit_plan, emit_thinking, emit_step, emit_tool_call,
     emit_tool_result, emit_file, emit_token, emit_done, emit_error, emit_spend,
+    emit_subagent,
 )
 from tools.executor import TOOL_DEFINITIONS, dispatch_tool
 from providers.proxy import estimate_inr
+
+_SOLO_NAMES = [
+    "Ananya", "Priya", "Kavya", "Divya", "Shreya", "Meera", "Aditi",
+    "Siya", "Tanvi", "Riya", "Nandini", "Avni", "Diya", "Vrinda",
+    "Saanvi", "Navya", "Aanya", "Ishita", "Kyara", "Aisha",
+]
 
 MAX_STEPS = 20
 MAX_TOOL_RETRIES = 2
@@ -88,6 +97,11 @@ def run_solo(
     workspace = workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=True)
 
+    # Emit solo agent identity with a random Indian female name
+    solo_id = str(uuid.uuid4())[:8]
+    solo_name = random.choice(_SOLO_NAMES)
+    emit_subagent(solo_id, query[:80], "spawned", name=solo_name)
+
     # ── Step 0: Plan ──────────────────────────────────────────────────────────
     try:
         plan_resp = client.chat.completions.create(
@@ -110,6 +124,7 @@ def run_solo(
 
     steps = _extract_plan(plan_text)
     emit_plan(steps)
+    emit_subagent(solo_id, query[:80], "working", name=solo_name)
 
     # ── Main execution loop ───────────────────────────────────────────────────
     messages: list[dict] = [
@@ -252,5 +267,6 @@ def run_solo(
     # ── Summary ───────────────────────────────────────────────────────────────
     summary = last_response[:500] if last_response else "Task completed."
     tokens_used = total_prompt_tokens + total_completion_tokens
+    emit_subagent(solo_id, query[:80], "done", summary=summary[:200], name=solo_name)
     emit_done(True, summary, tokens_used)
     return {"ok": True, "summary": summary, "tokens_used": tokens_used, "inr": total_inr}

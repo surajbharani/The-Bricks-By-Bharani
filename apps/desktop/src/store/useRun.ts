@@ -18,6 +18,7 @@ export interface RunToolCall {
 export interface SubagentRun {
   id: string;
   brick: string;
+  name?: string;
   status: 'spawned' | 'working' | 'done';
   summary?: string;
 }
@@ -32,6 +33,10 @@ export type RunStatus = 'idle' | 'planning' | 'running' | 'done' | 'error';
 export interface AgentHistoryItem {
   query: string;
   response: string;
+  agentCount?: number;
+  agentNames?: string[];
+  tokensUsed?: number;
+  mode?: 'solo' | 'swarm';
 }
 
 interface RunState {
@@ -140,6 +145,7 @@ export const useRun = create<RunState>()(
           updated[event.id] = {
             id: event.id,
             brick: event.brick,
+            name: event.name,
             status: event.status,
             summary: event.summary,
           };
@@ -149,17 +155,28 @@ export const useRun = create<RunState>()(
         case 'spend':
           return { tokensUsed: event.tokens, inr: event.inr };
 
-        case 'done':
+        case 'done': {
+          const agents = Object.values(s.subagents);
+          const agentNames = [...new Set(agents.map((a) => a.name).filter(Boolean))] as string[];
+          const agentCount = agents.length;
+          const mode: 'solo' | 'swarm' = agentCount <= 1 ? 'solo' : 'swarm';
           return {
             status: 'done',
             summary: event.summary,
             tokensUsed: event.tokensUsed,
-            // Persist this turn so the conversation thread survives further runs / reloads
             agentHistory: [
               ...s.agentHistory,
-              { query: s.query, response: event.summary || s.tokenStream },
+              {
+                query: s.query,
+                response: event.summary || s.tokenStream,
+                agentCount,
+                agentNames,
+                tokensUsed: event.tokensUsed,
+                mode,
+              },
             ],
           };
+        }
 
         case 'error':
           return {

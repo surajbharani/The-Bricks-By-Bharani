@@ -15,7 +15,7 @@ interface SidebarProps {
 
 export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
   const { conversationId, newConversation, loadConversation } = useSession();
-  const { conversations, agentRuns, deleteConversation, deleteAgentRun, updateConversationMeta } = useHistory();
+  const { conversations, agentRuns, deleteConversation, deleteAgentRun, updateConversationMeta, loadAgentRun } = useHistory();
   const { user, signOut } = useAuth();
   const { settings } = useMemory();
   const { sidebarWidth } = useTheme();
@@ -267,24 +267,69 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
           );
         })}
 
-        {/* Ungrouped chats */}
-        {ungrouped.length > 0 && (
-          <>
-            {folders.length > 0 && (
-              <p className="px-2 pt-1 pb-0.5 text-[9px] font-semibold uppercase tracking-widest text-text-lo opacity-60">
-                Chats
-              </p>
-            )}
-            <div className="space-y-0.5">{ungrouped.map(renderConv)}</div>
-          </>
-        )}
+        {/* Ungrouped chats — merged with agent runs in one chronological list */}
+        {(() => {
+          // Merge ungrouped chats + agent runs into one list sorted by time
+          const chatItems = ungrouped.map((c) => ({ type: 'chat' as const, ts: c.updatedAt, data: c }));
+          const agentItems = sortedRuns.map((r) => ({ type: 'agent' as const, ts: r.createdAt, data: r }));
+          const merged = [...chatItems, ...agentItems].sort((a, b) => b.ts - a.ts);
 
-        {activeConvs.length === 0 && !search && (
-          <p className="text-xs text-text-lo px-2 py-4 text-center opacity-50">No history yet</p>
-        )}
-        {activeConvs.length === 0 && search && (
-          <p className="text-xs text-text-lo px-2 py-4 text-center opacity-50">No matches</p>
-        )}
+          if (merged.length === 0 && folders.length === 0) {
+            return search
+              ? <p className="text-xs text-text-lo px-2 py-4 text-center opacity-50">No matches</p>
+              : <p className="text-xs text-text-lo px-2 py-4 text-center opacity-50">No history yet</p>;
+          }
+
+          return (
+            <div className="space-y-0.5">
+              {merged.map((item) => {
+                if (item.type === 'chat') {
+                  const conv = item.data as typeof ungrouped[0];
+                  return (
+                    <div key={`chat-${conv.id}`} className="relative">
+                      {renderConv(conv)}
+                      {!isCollapsed && (
+                        <span className="absolute top-1.5 right-7 text-[8px] font-semibold px-1 py-0.5 rounded bg-bg-elevated border border-border-hair text-text-lo opacity-70 pointer-events-none">
+                          Chat
+                        </span>
+                      )}
+                    </div>
+                  );
+                } else {
+                  const run = item.data as typeof sortedRuns[0];
+                  return (
+                    <div
+                      key={`agent-${run.id}`}
+                      className="group relative flex items-start gap-1.5 px-2.5 py-2 rounded-lg border border-red-core/10 hover:bg-bg-elevated hover:border-red-core/20 transition-colors cursor-pointer"
+                      onClick={() => loadAgentRun(run.id)}
+                    >
+                      <AgentIcon ok={run.status === 'done'} />
+                      {!isCollapsed && (
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span className="text-[8px] font-semibold px-1 py-0.5 rounded bg-red-core/15 border border-red-core/20 text-red-core">
+                              Agent
+                            </span>
+                          </div>
+                          <p className="text-xs text-text-hi truncate leading-snug">{run.query}</p>
+                          {run.summary && (
+                            <p className="text-[9px] text-text-lo truncate mt-0.5">{run.summary}</p>
+                          )}
+                          <p className="text-[9px] text-text-lo mt-0.5">
+                            {relativeTime(run.createdAt)} · {run.tokensUsed.toLocaleString()} tokens
+                          </p>
+                        </div>
+                      )}
+                      <ActionBtn title="Delete" onClick={(e) => { e.stopPropagation(); deleteAgentRun(run.id); }}>
+                        <TrashIcon />
+                      </ActionBtn>
+                    </div>
+                  );
+                }
+              })}
+            </div>
+          );
+        })()}
 
         {/* Archived section */}
         {archivedConvs.length > 0 && (
@@ -301,35 +346,6 @@ export function Sidebar({ onOpenShortcuts }: SidebarProps = {}) {
             </button>
             {showArchived && <div className="ml-2 space-y-0.5">{archivedConvs.map(renderConv)}</div>}
           </div>
-        )}
-
-        {/* Agent runs */}
-        {sortedRuns.length > 0 && (
-          <>
-            <p className="px-2 pt-3 pb-1 text-[9px] font-semibold uppercase tracking-widest text-text-lo opacity-60">
-              Agent runs
-            </p>
-            {sortedRuns.map((run) => (
-              <div
-                key={run.id}
-                className="group relative flex items-start gap-1.5 px-2.5 py-2 rounded-lg border border-transparent hover:bg-bg-elevated transition-colors"
-              >
-                <AgentIcon ok={run.status === 'done'} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-text-hi truncate leading-snug">{run.query}</p>
-                  {run.summary && (
-                    <p className="text-[9px] text-text-lo truncate mt-0.5">{run.summary}</p>
-                  )}
-                  <p className="text-[9px] text-text-lo mt-0.5">
-                    {relativeTime(run.createdAt)} · {run.tokensUsed.toLocaleString()} tokens
-                  </p>
-                </div>
-                <ActionBtn title="Delete" onClick={(e) => { e.stopPropagation(); deleteAgentRun(run.id); }}>
-                  <TrashIcon />
-                </ActionBtn>
-              </div>
-            ))}
-          </>
         )}
       </div>
 

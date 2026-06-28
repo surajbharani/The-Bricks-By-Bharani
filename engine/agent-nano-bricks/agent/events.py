@@ -41,8 +41,11 @@ def emit_subagent(
     brick: str,
     status: Literal["spawned", "working", "done"],
     summary: Optional[str] = None,
+    name: str = "",
 ) -> None:
     ev: dict = {"t": "subagent", "id": agent_id, "brick": brick, "status": status}
+    if name:
+        ev["name"] = name
     if summary is not None:
         ev["summary"] = summary
     _emit(ev)

@@ -147,7 +147,7 @@ export function RunView() {
         {steps.length > 0 && (
           <div className="space-y-0 mb-2">
             {steps.map((step, idx) => (
-              <TimelineNode key={step.i} step={step} isLast={idx === steps.length - 1} />
+              <TimelineNode key={step.i} step={step} isLast={idx === steps.length - 1} index={idx} />
             ))}
           </div>
         )}

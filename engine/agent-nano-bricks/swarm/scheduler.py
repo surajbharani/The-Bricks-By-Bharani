@@ -3,11 +3,23 @@ Swarm scheduler — ready-queue + ThreadPoolExecutor + dependency resolution.
 Each brick runs as an isolated Solo agent in its own workspace subfolder.
 Architecture derived from Hermes Agent (MIT, © Nous Research).
 """
+import random
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, Future
 from pathlib import Path
 from typing import Optional
+
+_FEMALE_NAMES = [
+    "Ananya", "Priya", "Kavya", "Divya", "Shreya", "Meera", "Aditi",
+    "Siya", "Tanvi", "Riya", "Nandini", "Avni", "Diya", "Vrinda",
+    "Saanvi", "Navya", "Aanya", "Ishita", "Kyara", "Aisha",
+]
+_MALE_NAMES = [
+    "Arjun", "Vikram", "Rohan", "Aditya", "Dhruv", "Pranav", "Siddharth",
+    "Veer", "Kabir", "Ishan", "Dev", "Yash", "Raj", "Param", "Shaurya",
+    "Aarav", "Rehan", "Kiran", "Advait", "Nihal",
+]
 
 from openai import OpenAI
 
@@ -40,6 +52,14 @@ def run_swarm(
     max_concurrency = caps.get("max_concurrency", MAX_CONCURRENCY)
     max_inr = caps.get("max_inr", 10.0)
 
+    # Assign Indian names — female pool for simple tasks (≤2 bricks), male for complex
+    name_pool = _FEMALE_NAMES if len(bricks) <= 2 else _MALE_NAMES
+    shuffled_names = random.sample(name_pool, min(len(bricks), len(name_pool)))
+    brick_names: dict[str, str] = {
+        b["id"]: shuffled_names[i % len(shuffled_names)]
+        for i, b in enumerate(bricks)
+    }
+
     completed: dict[str, dict] = {}  # brick_id → result
     lock = threading.Lock()
     total_tokens = 0
@@ -53,10 +73,11 @@ def run_swarm(
         nonlocal total_tokens, total_inr, all_ok
 
         agent_id = str(uuid.uuid4())[:8]
+        agent_name = brick_names.get(brick["id"], "Agent")
         brick_workspace = workspace / f"brick_{brick['id']}"
         brick_caps = {**caps, "max_inr": max_inr / len(bricks)}  # split ₹ budget
 
-        emit_subagent(agent_id, brick["goal"], "spawned")
+        emit_subagent(agent_id, brick["goal"], "spawned", name=agent_name)
 
         # Build enriched query with dependency context
         dep_context = ""
@@ -69,7 +90,7 @@ def run_swarm(
 
         enriched_query = brick["goal"] + dep_context
 
-        emit_subagent(agent_id, brick["goal"], "working")
+        emit_subagent(agent_id, brick["goal"], "working", name=agent_name)
 
         brick_client = client if client is not None else make_client(jwt)
         result = run_solo(enriched_query, model, brick_workspace, brick_client, brick_caps)
@@ -82,7 +103,7 @@ def run_swarm(
             if not result.get("ok"):
                 all_ok = False
 
-        emit_subagent(agent_id, brick["goal"], "done", summary=summary)
+        emit_subagent(agent_id, brick["goal"], "done", summary=summary, name=agent_name)
 
     # ── Ready-queue scheduler ─────────────────────────────────────────────────
     remaining = list(bricks)
