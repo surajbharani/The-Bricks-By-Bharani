@@ -1,13 +1,21 @@
 """
-Agent Nano Bricks — Solo Agent Loop
-Plan → Act → Verify → Repeat until done.
-High limits: 60 steps, no spend ceiling, full retry logic.
+Agent Nano Bricks — Solo Agent Loop (Hermes-grade)
+
+Plan → Act → Verify → Repeat, with the full Hermes capability set rebuilt in
+our own version:
+  • Persistent memory      — remembers the user & past tasks across sessions
+  • Context compression    — runs indefinitely, never "context length exceeded"
+  • Error classification    — knows rate-limit vs auth vs context vs server
+  • Model fallback         — auto-switches to a backup model on fatal errors
+  • Iteration budget       — step count scales with task complexity
+  • Skill memory           — learns reusable skills and gets better over time
 """
 import json
 import re
 import time
 import uuid
 from pathlib import Path
+from typing import Optional
 
 from openai import OpenAI
 
@@ -18,12 +26,16 @@ from agent.events import (
 )
 from tools.executor import TOOL_DEFINITIONS, dispatch_tool
 from providers.proxy import estimate_inr
+from agent.context_compressor import maybe_compress
+from agent.error_classifier import classify_api_error, ErrorKind, RETRYABLE, FALLBACKABLE, human_message
+from agent.model_fallback import fallback_chain, next_model
+from agent.budget import estimate_budget
 
 # ── Limits ────────────────────────────────────────────────────────────────────
-MAX_STEPS = 60          # steps before hard stop
-MAX_TOOL_RETRIES = 3    # retries per failed tool call
-MODEL_RETRIES = 4       # retries on model API error
-RETRY_BACKOFF = [1, 2, 4, 8]  # seconds between model retries
+MAX_STEPS = 80
+MAX_TOOL_RETRIES = 3
+MODEL_RETRIES = 4
+RETRY_BACKOFF = [1, 2, 4, 8]
 
 _SYSTEM_PROMPT = open(
     Path(__file__).parent.parent / "prompts" / "system.md"
@@ -53,7 +65,6 @@ def _extract_plan(text: str) -> list[str]:
                 return [str(s) for s in steps[:8]]
     except Exception:
         pass
-    # Fallback: split lines
     lines = [l.strip("•-. \t0123456789)") for l in text.splitlines() if l.strip()]
     lines = [l for l in lines if len(l) > 4]
     return lines[:8] or ["Analyze the task", "Execute the solution", "Verify and complete"]
@@ -61,8 +72,7 @@ def _extract_plan(text: str) -> list[str]:
 
 def _summarize_result(result: dict) -> str:
     if not result.get("ok"):
-        err = result.get("error", "unknown error")
-        return f"Error: {err[:300]}"
+        return f"Error: {str(result.get('error', 'unknown'))[:300]}"
     for key in ("content", "output", "text", "html", "value"):
         if key in result:
             v = str(result[key])
@@ -75,33 +85,6 @@ def _summarize_result(result: dict) -> str:
     return "OK"
 
 
-def _call_model_with_retry(client: OpenAI, model: str, messages: list, tools=None,
-                           stream: bool = False, max_tokens: int = 4096) -> any:
-    """Call model with automatic retry on transient errors."""
-    last_err = None
-    for attempt in range(MODEL_RETRIES):
-        try:
-            kwargs = dict(model=model, messages=messages, max_tokens=max_tokens)
-            if tools:
-                kwargs["tools"] = tools
-                kwargs["tool_choice"] = "auto"
-            if stream:
-                kwargs["stream"] = True
-                kwargs["stream_options"] = {"include_usage": True}
-            return client.chat.completions.create(**kwargs)
-        except Exception as e:
-            last_err = e
-            err_str = str(e).lower()
-            # Don't retry on auth/quota errors
-            if any(x in err_str for x in ("401", "403", "invalid api key", "quota exceeded")):
-                raise
-            if attempt < MODEL_RETRIES - 1:
-                wait = RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)]
-                emit_thinking(f"Model error (attempt {attempt+1}/{MODEL_RETRIES}), retrying in {wait}s…")
-                time.sleep(wait)
-    raise last_err
-
-
 def run_solo(
     query: str,
     model: str,
@@ -110,9 +93,16 @@ def run_solo(
     caps: dict,
     step_offset: int = 0,
     emit_identity: bool = True,
+    memory=None,
+    skills=None,
 ) -> dict:
-    """Run a solo agent loop. Returns {ok, summary, tokens_used, inr}."""
-    max_steps = min(caps.get("max_steps", MAX_STEPS), MAX_STEPS)
+    """Run a solo agent loop with the full capability set.
+    Returns {ok, summary, tokens_used, inr}."""
+
+    # ── Iteration budget (Hermes: dynamic step budgeting) ─────────────────────
+    requested = caps.get("max_steps")
+    max_steps = estimate_budget(query, requested)
+    max_steps = min(max_steps, MAX_STEPS)
 
     total_prompt_tokens = 0
     total_completion_tokens = 0
@@ -127,18 +117,36 @@ def run_solo(
     if emit_identity:
         emit_subagent(solo_id, query[:80], "spawned", name=solo_name)
 
-    # ── Step 0: Plan ──────────────────────────────────────────────────────────
+    # ── Build system prompt with MEMORY + SKILLS (Hermes: cross-session recall)
+    system_prompt = _SYSTEM_PROMPT
     try:
-        plan_resp = _call_model_with_retry(
-            client, model,
-            [{"role": "system", "content": _PLAN_PROMPT}, {"role": "user", "content": query}],
-            max_tokens=512,
-        )
+        if memory is not None:
+            mem_block = memory.build_context_block(query)
+            if mem_block:
+                system_prompt = mem_block + "\n\n---\n\n" + system_prompt
+        if skills is not None:
+            skill_block = skills.skills_block(query)
+            if skill_block:
+                system_prompt = skill_block + "\n\n---\n\n" + system_prompt
+    except Exception:
+        pass
+
+    # Model fallback chain (Hermes: provider failover)
+    chain = fallback_chain(model)
+    current_model = model
+
+    # ── Step 0: Plan ──────────────────────────────────────────────────────────
+    plan_messages = [
+        {"role": "system", "content": (system_prompt + "\n\n" + _PLAN_PROMPT[len(_SYSTEM_PROMPT):])},
+        {"role": "user", "content": query},
+    ]
+    try:
+        plan_resp = _safe_create(client, current_model, plan_messages, max_tokens=512)
         plan_text = plan_resp.choices[0].message.content or ""
         if plan_resp.usage:
             total_prompt_tokens += plan_resp.usage.prompt_tokens
             total_completion_tokens += plan_resp.usage.completion_tokens
-            total_inr += estimate_inr(model, plan_resp.usage.prompt_tokens, plan_resp.usage.completion_tokens)
+            total_inr += estimate_inr(current_model, plan_resp.usage.prompt_tokens, plan_resp.usage.completion_tokens)
     except Exception as e:
         emit_error(f"Failed to generate plan: {e}")
         return {"ok": False, "summary": f"Plan failed: {e}", "tokens_used": 0, "inr": 0.0}
@@ -151,51 +159,92 @@ def run_solo(
 
     # ── Main Loop ─────────────────────────────────────────────────────────────
     messages: list[dict] = [
-        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": query},
     ]
 
     last_response = ""
-    consecutive_no_tool = 0  # track how many times model returns text without tools
+    consecutive_no_tool = 0
 
     for step_i in range(step_offset, step_offset + max_steps):
         step_idx = step_i - step_offset
         step_label = steps[step_idx] if step_idx < len(steps) else f"Step {step_i + 1}"
         emit_step(step_i, step_label, "run")
 
-        # ── Model Call ────────────────────────────────────────────────────────
+        # ── Proactive context compression (Hermes: never overflow) ────────────
         try:
-            response = _call_model_with_retry(
-                client, model, messages,
-                tools=TOOL_DEFINITIONS, stream=True, max_tokens=4096,
-            )
-        except Exception as e:
-            emit_step(step_i, step_label, "fail")
-            emit_error(f"Model error at step {step_i + 1}: {e}")
-            # Return what we have so far instead of crashing completely
-            summary = last_response[:500] if last_response else f"Agent stopped at step {step_i+1}: {e}"
-            tokens_used = total_prompt_tokens + total_completion_tokens
-            if emit_identity:
-                emit_subagent(solo_id, query[:80], "done", summary=summary[:200], name=solo_name)
-            emit_done(False, summary, tokens_used)
-            return {"ok": False, "summary": summary, "tokens_used": tokens_used, "inr": total_inr}
+            messages, did = maybe_compress(messages, client, current_model)
+            if did:
+                emit_thinking("Compressed earlier history to keep working without limits.")
+        except Exception:
+            pass
 
-        # ── Stream Response ───────────────────────────────────────────────────
+        # ── Model call with classify → retry / compress / fallback ────────────
+        response = None
+        attempts = 0
+        while response is None:
+            try:
+                response = client.chat.completions.create(
+                    model=current_model,
+                    messages=messages,
+                    tools=TOOL_DEFINITIONS,
+                    tool_choice="auto",
+                    max_tokens=4096,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                )
+            except Exception as e:
+                attempts += 1
+                kind = classify_api_error(e)
+
+                if kind in (ErrorKind.AUTH, ErrorKind.QUOTA):
+                    emit_step(step_i, step_label, "fail")
+                    emit_error(human_message(kind))
+                    return _finalize(False, last_response or human_message(kind),
+                                     total_prompt_tokens + total_completion_tokens, total_inr,
+                                     emit_identity, solo_id, solo_name, query)
+
+                if kind == ErrorKind.CONTEXT_LENGTH:
+                    emit_thinking("Context full — compressing history and retrying.")
+                    messages, did = maybe_compress(messages, client, current_model, force=True)
+                    if attempts <= MODEL_RETRIES:
+                        continue
+
+                if kind in FALLBACKABLE or attempts > MODEL_RETRIES:
+                    nm = next_model(current_model, chain)
+                    if nm:
+                        emit_thinking(f"Switching to fallback model: {nm.split('/')[-1]}")
+                        current_model = nm
+                        continue
+
+                if kind in RETRYABLE and attempts <= MODEL_RETRIES:
+                    wait = RETRY_BACKOFF[min(attempts - 1, len(RETRY_BACKOFF) - 1)]
+                    emit_thinking(f"{human_message(kind)} (retry {attempts}/{MODEL_RETRIES} in {wait}s)")
+                    time.sleep(wait)
+                    continue
+
+                # Out of options
+                emit_step(step_i, step_label, "fail")
+                emit_error(f"Model error: {e}")
+                return _finalize(False, last_response or str(e),
+                                 total_prompt_tokens + total_completion_tokens, total_inr,
+                                 emit_identity, solo_id, solo_name, query)
+
+        # ── Stream the response ───────────────────────────────────────────────
         content_parts: list[str] = []
         tool_calls_raw: dict[int, dict] = {}
         finish_reason = None
 
         try:
             for chunk in response:
+                if hasattr(chunk, "usage") and chunk.usage:
+                    total_prompt_tokens += chunk.usage.prompt_tokens or 0
+                    total_completion_tokens += chunk.usage.completion_tokens or 0
+                    total_inr += estimate_inr(current_model, chunk.usage.prompt_tokens or 0, chunk.usage.completion_tokens or 0)
+
                 choice = chunk.choices[0] if chunk.choices else None
                 if choice is None:
-                    # Usage-only chunk
-                    if hasattr(chunk, "usage") and chunk.usage:
-                        total_prompt_tokens += chunk.usage.prompt_tokens or 0
-                        total_completion_tokens += chunk.usage.completion_tokens or 0
-                        total_inr += estimate_inr(model, chunk.usage.prompt_tokens or 0, chunk.usage.completion_tokens or 0)
                     continue
-
                 delta = choice.delta
                 finish_reason = choice.finish_reason or finish_reason
 
@@ -218,14 +267,8 @@ def run_solo(
                             tool_calls_raw[idx]["id"] = tc.id
                         if tc.function.name:
                             tool_calls_raw[idx]["function"]["name"] = tc.function.name
-
-                if hasattr(chunk, "usage") and chunk.usage:
-                    total_prompt_tokens += chunk.usage.prompt_tokens or 0
-                    total_completion_tokens += chunk.usage.completion_tokens or 0
-                    total_inr += estimate_inr(model, chunk.usage.prompt_tokens or 0, chunk.usage.completion_tokens or 0)
         except Exception as e:
-            emit_thinking(f"Stream interrupted at step {step_i + 1}: {e}")
-            # Continue with whatever we got
+            emit_thinking(f"Stream interrupted: {e}")
 
         content = "".join(content_parts)
         last_response = content if content else last_response
@@ -233,7 +276,6 @@ def run_solo(
 
         emit_spend(total_prompt_tokens + total_completion_tokens, total_inr)
 
-        # Build assistant message
         asst_msg: dict = {"role": "assistant", "content": content}
         if tool_calls_list:
             asst_msg["tool_calls"] = tool_calls_list
@@ -242,7 +284,7 @@ def run_solo(
         if content and not tool_calls_list:
             emit_thinking(content[:400])
 
-        # ── Tool Execution ────────────────────────────────────────────────────
+        # ── Tool execution ────────────────────────────────────────────────────
         if tool_calls_list:
             consecutive_no_tool = 0
             for tc in tool_calls_list:
@@ -255,7 +297,6 @@ def run_solo(
                 arg_summary = ", ".join(f"{k}={str(v)[:80]}" for k, v in fn_args.items())
                 emit_tool_call(fn_name, arg_summary)
 
-                # Execute with retry on failure
                 result = None
                 for attempt in range(MAX_TOOL_RETRIES):
                     result = dispatch_tool(workspace, fn_name, fn_args)
@@ -264,8 +305,7 @@ def run_solo(
                     if attempt < MAX_TOOL_RETRIES - 1:
                         time.sleep(0.5)
 
-                out_summary = _summarize_result(result)
-                emit_tool_result(fn_name, out_summary, result.get("ok", False))
+                emit_tool_result(fn_name, _summarize_result(result), result.get("ok", False))
 
                 if fn_name == "write_file" and result.get("ok"):
                     emit_file(result.get("path", fn_args.get("path", "")), result.get("action", "write"))
@@ -279,30 +319,55 @@ def run_solo(
             emit_step(step_i, step_label, "ok")
             continue
 
-        # ── No tool calls → check if done ─────────────────────────────────────
+        # ── No tools → done check ─────────────────────────────────────────────
         emit_step(step_i, step_label, "ok")
         consecutive_no_tool += 1
 
         content_lower = content.lower()
-        is_done = (
-            any(sig in content_lower for sig in _DONE_SIGNALS)
-            or finish_reason == "stop"
-        )
-
-        if is_done:
+        if any(sig in content_lower for sig in _DONE_SIGNALS) or finish_reason == "stop":
             break
-
-        # If model keeps responding with text but no tools for 3 turns, force stop
         if consecutive_no_tool >= 3:
             emit_thinking("Task appears complete.")
             break
 
-    # ── Final Summary ─────────────────────────────────────────────────────────
+    # ── Final summary + LEARN (Hermes: closed learning loop) ──────────────────
     summary = last_response[:600] if last_response else "Task completed."
     tokens_used = total_prompt_tokens + total_completion_tokens
 
+    try:
+        if memory is not None:
+            memory.record_turn(query, summary, True)
+            from agent.memory import extract_facts
+            for fact in extract_facts(query):
+                memory.remember_fact(fact)
+        if skills is not None:
+            skills.maybe_learn(client, current_model, query, summary, True)
+    except Exception:
+        pass
+
+    return _finalize(True, summary, tokens_used, total_inr,
+                     emit_identity, solo_id, solo_name, query)
+
+
+def _safe_create(client: OpenAI, model: str, messages: list, max_tokens: int):
+    """Non-streaming create with simple retry — used for planning."""
+    last = None
+    for attempt in range(MODEL_RETRIES):
+        try:
+            return client.chat.completions.create(model=model, messages=messages, max_tokens=max_tokens)
+        except Exception as e:
+            last = e
+            kind = classify_api_error(e)
+            if kind in (ErrorKind.AUTH, ErrorKind.QUOTA):
+                raise
+            if attempt < MODEL_RETRIES - 1:
+                time.sleep(RETRY_BACKOFF[min(attempt, len(RETRY_BACKOFF) - 1)])
+    raise last
+
+
+def _finalize(ok: bool, summary: str, tokens_used: int, inr: float,
+              emit_identity: bool, solo_id: str, solo_name: str, query: str) -> dict:
     if emit_identity:
         emit_subagent(solo_id, query[:80], "done", summary=summary[:200], name=solo_name)
-    emit_done(True, summary, tokens_used)
-
-    return {"ok": True, "summary": summary, "tokens_used": tokens_used, "inr": total_inr}
+    emit_done(ok, summary, tokens_used)
+    return {"ok": ok, "summary": summary, "tokens_used": tokens_used, "inr": inr}

@@ -105,26 +105,48 @@ def main() -> None:
 
     workspace.mkdir(parents=True, exist_ok=True)
 
+    # ── Persistent memory + skills (per-user, derived from the auth token) ────
+    memory = None
+    skills = None
+    try:
+        from agent.memory import MemoryStore
+        from agent.skills import SkillStore
+        # Memory lives in a stable folder so it survives across every session.
+        mem_base = workspace
+        memory = MemoryStore(mem_base, token=jwt or deepseek_key or "local")
+        skills = SkillStore(memory)
+    except Exception:
+        memory = None
+        skills = None
+
     # ── Dispatch ──────────────────────────────────────────────────────────────
     if mode == "swarm":
-        _run_swarm(query, model, workspace, jwt, client, caps)
+        _run_swarm(query, model, workspace, jwt, client, caps, memory, skills)
     else:
-        _run_solo(query, model, workspace, client, caps)
+        _run_solo(query, model, workspace, client, caps, memory, skills)
+
+    # ── Record a session summary so the next session remembers this one ───────
+    try:
+        if memory is not None:
+            memory.record_session_summary(f"Task: {query[:200]}")
+            memory.close()
+    except Exception:
+        pass
 
 
-def _run_solo(query, model, workspace, client, caps):
+def _run_solo(query, model, workspace, client, caps, memory=None, skills=None):
     from agent.loop import run_solo
     try:
-        run_solo(query, model, workspace, client, caps, emit_identity=True)
+        run_solo(query, model, workspace, client, caps,
+                 emit_identity=True, memory=memory, skills=skills)
     except Exception as e:
         _emit_error(f"Agent error: {e}")
 
 
-def _run_swarm(query, model, workspace, jwt, client, caps):
+def _run_swarm(query, model, workspace, jwt, client, caps, memory=None, skills=None):
     from swarm.decompose import decompose
     from swarm.scheduler import run_swarm
     from agent.events import emit_thinking
-    from agent.loop import run_solo
 
     emit_thinking("Analyzing task for parallel execution…")
 
@@ -132,13 +154,21 @@ def _run_swarm(query, model, workspace, jwt, client, caps):
 
     if not bricks or len(bricks) <= 1:
         emit_thinking("Task is best handled by a single agent.")
-        _run_solo(query, model, workspace, client, caps)
+        _run_solo(query, model, workspace, client, caps, memory, skills)
         return
 
     emit_thinking(f"Spawning {len(bricks)} parallel agents…")
     try:
         result = run_swarm(query, bricks, model, workspace, jwt, caps, client=client)
-        if not result.get("ok"):
+        # Learn from the overall swarm outcome at the top level.
+        try:
+            if memory is not None and result:
+                memory.record_turn(query, result.get("summary", "")[:600], result.get("ok", False))
+            if skills is not None and result and result.get("ok"):
+                skills.maybe_learn(client, model, query, result.get("summary", "")[:600], True)
+        except Exception:
+            pass
+        if result and not result.get("ok"):
             _emit_error("Swarm completed with one or more failures. See brick summaries above.")
     except Exception as e:
         _emit_error(f"Swarm error: {e}")
