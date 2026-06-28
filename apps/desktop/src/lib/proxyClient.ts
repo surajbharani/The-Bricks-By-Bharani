@@ -49,8 +49,30 @@ function extractText(content: string | ContentBlock[]): string {
   return block?.type === 'text' ? block.text : '';
 }
 
+// DeepSeek (and some other models) default to Chinese on short prompts when no
+// language is anchored. Ensure every request carries an English-default
+// instruction so replies are in English unless the user clearly uses/asks for
+// another language. Folds into an existing system message if there is one.
+const LANGUAGE_ANCHOR =
+  'Always respond in English unless the user writes in another language or explicitly asks for one.';
+
+function withLanguageAnchor(
+  messages: ChatRequest['messages']
+): ChatRequest['messages'] {
+  if (messages.length > 0 && messages[0].role === 'system') {
+    const first = messages[0];
+    const content =
+      typeof first.content === 'string'
+        ? `${LANGUAGE_ANCHOR}\n\n${first.content}`
+        : first.content;
+    return [{ ...first, content }, ...messages.slice(1)];
+  }
+  return [{ role: 'system', content: LANGUAGE_ANCHOR }, ...messages];
+}
+
 export async function* streamChat(req: ChatRequest): AsyncGenerator<StreamChunk> {
   const { signal } = req;
+  req = { ...req, messages: withLanguageAnchor(req.messages) };
 
   if (import.meta.env.DEV && !import.meta.env.VITE_USE_REAL_PROXY) {
     yield* stubStream(extractText(req.messages.at(-1)?.content ?? ''));

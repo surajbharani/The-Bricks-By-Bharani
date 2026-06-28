@@ -75,7 +75,10 @@ export const useAuth = create<AuthState>()((set, get) => ({
   },
 
   devSignIn: () => {
-    // Local dev bypass — no Supabase call, sets a synthetic session state
+    // Local dev bypass — no Supabase call, sets a synthetic session state.
+    // Persist a flag so the dev session survives reloads (e.g. the crash-recovery
+    // reload), otherwise the in-memory session is lost and the user is bounced to login.
+    try { localStorage.setItem('nano-bricks-dev', '1'); } catch { /* ignore */ }
     set({
       isDev: true,
       loading: false,
@@ -112,6 +115,7 @@ export const useAuth = create<AuthState>()((set, get) => ({
 
   signOut: async () => {
     const { isDev } = get();
+    try { localStorage.removeItem('nano-bricks-dev'); } catch { /* ignore */ }
     if (!isDev) await supabase.auth.signOut();
     set({ session: null, user: null, usage: null, isDev: false });
   },
@@ -153,12 +157,55 @@ export const useAuth = create<AuthState>()((set, get) => ({
 }));
 
 // Bootstrap auth on import
-supabase.auth.getSession().then(({ data: { session } }) => {
-  useAuth.getState().setSession(session);
-  if (session) useAuth.getState().refreshUsage();
-});
+// 1. Restore a persisted dev session first (survives reloads).
+const hadDevSession = (() => {
+  try { return localStorage.getItem('nano-bricks-dev') === '1'; } catch { return false; }
+})();
 
-supabase.auth.onAuthStateChange((_event, session) => {
-  useAuth.getState().setSession(session);
-  if (session) useAuth.getState().refreshUsage();
+if (hadDevSession) {
+  useAuth.getState().devSignIn();
+} else {
+  supabase.auth
+    .getSession()
+    .then(({ data: { session } }) => {
+      // A dev session may have been set in the meantime — never overwrite it.
+      if (useAuth.getState().isDev) return;
+      useAuth.getState().setSession(session);
+      if (session) useAuth.getState().refreshUsage();
+    })
+    .catch(() => {
+      if (!useAuth.getState().isDev) useAuth.getState().setSession(null);
+    });
+}
+
+// 2. React to auth changes — but DEFENSIVELY.
+// Supabase fires events liberally (token refresh races, focus re-checks, initial
+// session) and some carry a null session that must NOT log the user out. Only an
+// explicit SIGNED_OUT clears the session. Dev sessions ignore Supabase entirely.
+supabase.auth.onAuthStateChange((event, session) => {
+  const state = useAuth.getState();
+
+  // Dev session is managed manually — Supabase events never touch it.
+  if (state.isDev) return;
+
+  switch (event) {
+    case 'SIGNED_OUT':
+      useAuth.getState().setSession(null);
+      break;
+    case 'INITIAL_SESSION':
+    case 'SIGNED_IN':
+    case 'TOKEN_REFRESHED':
+    case 'USER_UPDATED':
+      // Only adopt a *real* session. A spurious null here is ignored so the
+      // user is never bounced to the login screen mid-use.
+      if (session) {
+        useAuth.getState().setSession(session);
+        // Defer the DB read out of the auth callback — calling Supabase inside
+        // onAuthStateChange can deadlock the SDK.
+        setTimeout(() => useAuth.getState().refreshUsage(), 0);
+      }
+      break;
+    default:
+      break;
+  }
 });

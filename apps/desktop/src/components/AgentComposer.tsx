@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useSession } from '../store/useSession';
 import { useRun } from '../store/useRun';
 import { useAuth } from '../store/useAuth';
+import { supabase } from '../lib/supabase';
 import type { AgentEvent } from '@nano-bricks/shared';
 
 const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -60,7 +61,18 @@ export function AgentComposer() {
       return;
     }
 
-    const jwt = session?.access_token ?? '';
+    // Grab the freshest possible JWT. The session in the store can be slightly
+    // stale; ask Supabase directly so the agent never runs with an expired token
+    // (which previously cascaded into the user being signed out).
+    let jwt = session?.access_token ?? '';
+    if (!useAuth.getState().isDev) {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (data.session?.access_token) jwt = data.session.access_token;
+      } catch {
+        // keep the store token as a fallback
+      }
+    }
     const openrouterKey = (import.meta.env.VITE_OPENROUTER_KEY as string | undefined) ?? '';
     const deepseekKey = (import.meta.env.VITE_DEEPSEEK_KEY as string | undefined) ?? '';
 
