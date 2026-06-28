@@ -110,6 +110,12 @@ export const useHistory = create<HistoryState>()(
     }),
     {
       name: 'nano-bricks-history',
+      onRehydrateStorage: () => (_state, error) => {
+        if (error) {
+          console.error('[useHistory] Failed to rehydrate, clearing store:', error);
+          localStorage.removeItem('nano-bricks-history');
+        }
+      },
       partialize: (s) => ({
         conversations: s.conversations.map((c) => ({
           ...c,

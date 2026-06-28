@@ -197,6 +197,12 @@ export const useRun = create<RunState>()(
       name: 'nano-bricks-run',
       // Only persist the conversation thread — transient run state stays in memory
       partialize: (s) => ({ agentHistory: s.agentHistory }),
+      onRehydrateStorage: () => (_state, error) => {
+        if (error) {
+          console.error('[useRun] Failed to rehydrate, clearing store:', error);
+          localStorage.removeItem('nano-bricks-run');
+        }
+      },
     }
   )
 );

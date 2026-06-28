@@ -297,6 +297,12 @@ export const useSession = create<SessionState>()(
     }),
     {
       name: 'nano-bricks-session',
+      onRehydrateStorage: () => (_state, error) => {
+        if (error) {
+          console.error('[useSession] Failed to rehydrate, clearing store:', error);
+          localStorage.removeItem('nano-bricks-session');
+        }
+      },
       partialize: (s) => ({
         conversationId: s.conversationId,
         mode: s.mode,
