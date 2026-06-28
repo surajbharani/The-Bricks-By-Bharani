@@ -167,7 +167,10 @@ def main() -> None:
         checkpoint = None
 
     # ── Human-in-the-loop: blocking ask() for questions/approvals ─────────────
-    ask_fn = _make_ask_fn()
+    # Honors the "Ask me" toggle from the agent screen. When off, ask_fn is None
+    # so the agent never pauses to ask — it decides everything itself (Undo is
+    # still available as the safety net).
+    ask_fn = _make_ask_fn() if caps.get("allow_ask", True) else None
 
     # ── Dispatch ──────────────────────────────────────────────────────────────
     if mode == "swarm":

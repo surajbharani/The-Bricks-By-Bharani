@@ -68,9 +68,11 @@ interface SessionState {
   showCanvas: boolean;
   responseLength: ResponseLength;
   regeneratePayload: string | null;
+  agentAskEnabled: boolean;
 
   setMode: (mode: AppMode) => void;
   setAgentMode: (agentMode: AgentMode) => void;
+  setAgentAskEnabled: (v: boolean) => void;
   setActiveProject: (id: string | null) => void;
   setModel: (model: string) => void;
   setResponseLength: (v: ResponseLength) => void;
@@ -109,6 +111,7 @@ export const useSession = create<SessionState>()(
       conversationId: makeId(),
       mode: 'chat',
       agentMode: 'solo',
+      agentAskEnabled: true,
       model: DEFAULT_MODEL,
       messages: [],
       isStreaming: false,
@@ -120,6 +123,7 @@ export const useSession = create<SessionState>()(
 
       setMode: (mode) => set({ mode }),
       setAgentMode: (agentMode) => set({ agentMode }),
+      setAgentAskEnabled: (agentAskEnabled) => set({ agentAskEnabled }),
       setModel: (model) => set({ model }),
       setResponseLength: (responseLength) => set({ responseLength }),
       setRegeneratePayload: (regeneratePayload) => set({ regeneratePayload }),
@@ -310,6 +314,7 @@ export const useSession = create<SessionState>()(
         conversationId: s.conversationId,
         mode: s.mode,
         agentMode: s.agentMode,
+        agentAskEnabled: s.agentAskEnabled,
         model: s.model,
         messages: s.messages.map((m) => ({ ...m, streaming: false })),
         thinking: s.thinking,

@@ -7,7 +7,7 @@ interface Props {
 }
 
 export function RunHeader({ onStop }: Props) {
-  const { model, agentMode } = useSession();
+  const { model, agentMode, agentAskEnabled, setAgentAskEnabled } = useSession();
   const { status, tokensUsed, inr } = useRun();
 
   const isActive = status === 'planning' || status === 'running';
@@ -47,6 +47,31 @@ export function RunHeader({ onStop }: Props) {
       </div>
 
       <div className="flex items-center gap-3">
+        {/* Ask-me toggle — when off, the agent never pauses to ask questions */}
+        <button
+          onClick={() => setAgentAskEnabled(!agentAskEnabled)}
+          title={
+            agentAskEnabled
+              ? 'Agent can ask you questions when it needs clarity. Click to turn off.'
+              : 'Agent will never ask — it decides everything itself. Click to turn on.'
+          }
+          className="flex items-center gap-1.5 group"
+        >
+          <span className="text-[10px] font-mono uppercase tracking-wide text-text-lo group-hover:text-text-hi transition-colors">
+            Ask&nbsp;me
+          </span>
+          <span
+            className="relative w-7 h-4 rounded-full transition-colors duration-200"
+            style={{ background: agentAskEnabled ? '#FF1F2E' : '#26262B' }}
+          >
+            <motion.span
+              className="absolute top-0.5 w-3 h-3 rounded-full bg-white"
+              animate={{ left: agentAskEnabled ? '14px' : '2px' }}
+              transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+            />
+          </span>
+        </button>
+
         {tokensUsed > 0 && (
           <span className="text-xs text-text-lo font-mono">
             {tokensUsed.toLocaleString()} tokens · ₹{inr.toFixed(3)}

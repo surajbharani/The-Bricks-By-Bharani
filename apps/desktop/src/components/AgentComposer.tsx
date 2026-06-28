@@ -11,7 +11,7 @@ import type { AgentEvent } from '@nano-bricks/shared';
 const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 export function AgentComposer() {
-  const { agentMode, model } = useSession();
+  const { agentMode, model, agentAskEnabled } = useSession();
   const { status, startRun, applyEvent, resetRun, agentHistory } = useRun();
   const { session } = useAuth();
   const [text, setText] = useState('');
@@ -98,7 +98,7 @@ export function AgentComposer() {
           token: jwt,
           openrouter_key: openrouterKey,
           deepseek_key: deepseekKey,
-          caps: { max_steps: 20, max_concurrency: 4, max_inr: 50.0 },
+          caps: { max_steps: 20, max_concurrency: 4, max_inr: 50.0, allow_ask: agentAskEnabled },
         },
       });
     } catch (err) {
