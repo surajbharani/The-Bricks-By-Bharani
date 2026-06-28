@@ -33,6 +33,11 @@ a = Analysis(
         'anyio',
         'anyio._backends._asyncio',
         'distutils',
+        # Document tools (imported lazily inside tools/executor.py)
+        'pypdf',
+        'docx',
+        'openpyxl',
+        'fpdf',
     ],
     hookspath=[],
     hooksconfig={},

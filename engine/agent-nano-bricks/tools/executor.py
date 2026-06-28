@@ -485,6 +485,225 @@ def browser_action(workspace: Path, action: str, url: str = "", selector: str = 
         return {"ok": False, "error": str(e)}
 
 
+# ── Document Tools ────────────────────────────────────────────────────────────
+
+def read_document(workspace: Path, path: str) -> dict[str, Any]:
+    """Read PDF / Word / Excel / CSV / text and return its text content.
+    Degrades with a clear, actionable error if an optional library is missing."""
+    try:
+        target = _safe_path(workspace, path)
+        if not target.exists():
+            return {"ok": False, "error": f"File not found: {path}"}
+        ext = target.suffix.lower()
+
+        if ext == ".pdf":
+            try:
+                try:
+                    from pypdf import PdfReader
+                except ImportError:
+                    from PyPDF2 import PdfReader
+            except ImportError:
+                return {"ok": False, "error": "PDF support needs pypdf. Run: pip install pypdf"}
+            except BaseException as e:
+                return {"ok": False, "error": f"PDF library failed to load: {e}"}
+            reader = PdfReader(str(target))
+            pages = [(p.extract_text() or "") for p in reader.pages]
+            text = "\n\n".join(pages)
+            return {"ok": True, "content": text[:40000], "pages": len(pages)}
+
+        if ext in (".docx",):
+            try:
+                import docx
+            except ImportError:
+                return {"ok": False, "error": "Word support needs python-docx. Run: pip install python-docx"}
+            d = docx.Document(str(target))
+            text = "\n".join(p.text for p in d.paragraphs)
+            return {"ok": True, "content": text[:40000], "paragraphs": len(d.paragraphs)}
+
+        if ext in (".xlsx", ".xlsm"):
+            try:
+                import openpyxl
+            except ImportError:
+                return {"ok": False, "error": "Excel support needs openpyxl. Run: pip install openpyxl"}
+            wb = openpyxl.load_workbook(str(target), read_only=True, data_only=True)
+            out = []
+            for ws in wb.worksheets:
+                out.append(f"# Sheet: {ws.title}")
+                for i, row in enumerate(ws.iter_rows(values_only=True)):
+                    if i >= 200:
+                        out.append("...[more rows omitted]")
+                        break
+                    out.append("\t".join("" if c is None else str(c) for c in row))
+            return {"ok": True, "content": "\n".join(out)[:40000], "sheets": len(wb.worksheets)}
+
+        # csv / tsv / txt / md / json / etc → plain text
+        text = target.read_text(encoding="utf-8", errors="replace")
+        return {"ok": True, "content": text[:40000]}
+    except SandboxViolation as e:
+        return {"ok": False, "error": str(e)}
+    except Exception as e:
+        return {"ok": False, "error": f"Could not read document: {e}"}
+
+
+def generate_document(workspace: Path, path: str, content: str, title: str = "") -> dict[str, Any]:
+    """Create a PDF or Word (.docx) document from text/markdown-ish content.
+    Format chosen by the output file extension."""
+    try:
+        target = _safe_path(workspace, path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        ext = target.suffix.lower()
+
+        if ext == ".pdf":
+            try:
+                from fpdf import FPDF
+            except ImportError:
+                return {"ok": False, "error": "PDF generation needs fpdf2. Run: pip install fpdf2"}
+            except BaseException as e:
+                return {"ok": False, "error": f"PDF library failed to load: {e}"}
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_auto_page_break(auto=True, margin=15)
+            if title:
+                pdf.set_font("Helvetica", "B", 16)
+                pdf.multi_cell(0, 10, title)
+                pdf.ln(2)
+            pdf.set_font("Helvetica", size=11)
+            for line in content.split("\n"):
+                safe = line.encode("latin-1", "replace").decode("latin-1")
+                pdf.multi_cell(0, 6, safe if safe else " ")
+            pdf.output(str(target))
+            return {"ok": True, "path": str(target), "format": "pdf"}
+
+        if ext == ".docx":
+            try:
+                import docx
+            except ImportError:
+                return {"ok": False, "error": "Word generation needs python-docx. Run: pip install python-docx"}
+            d = docx.Document()
+            if title:
+                d.add_heading(title, level=0)
+            for line in content.split("\n"):
+                if line.startswith("# "):
+                    d.add_heading(line[2:], level=1)
+                elif line.startswith("## "):
+                    d.add_heading(line[3:], level=2)
+                else:
+                    d.add_paragraph(line)
+            d.save(str(target))
+            return {"ok": True, "path": str(target), "format": "docx"}
+
+        # Fallback: plain text / markdown
+        if title:
+            content = f"# {title}\n\n{content}"
+        target.write_text(content, encoding="utf-8")
+        return {"ok": True, "path": str(target), "format": "text"}
+    except SandboxViolation as e:
+        return {"ok": False, "error": str(e)}
+    except Exception as e:
+        return {"ok": False, "error": f"Could not generate document: {e}"}
+
+
+def analyze_data(workspace: Path, path: str, question: str = "") -> dict[str, Any]:
+    """Analyze a CSV/Excel file: columns, row count, and numeric summaries.
+    Uses pandas if available, else a stdlib fallback for CSV."""
+    try:
+        target = _safe_path(workspace, path)
+        if not target.exists():
+            return {"ok": False, "error": f"File not found: {path}"}
+        ext = target.suffix.lower()
+        try:
+            import pandas as pd
+            df = pd.read_excel(str(target)) if ext in (".xlsx", ".xls", ".xlsm") else pd.read_csv(str(target))
+            summary = {
+                "rows": int(len(df)),
+                "columns": list(map(str, df.columns)),
+                "dtypes": {str(k): str(v) for k, v in df.dtypes.items()},
+            }
+            desc = df.describe(include="all").to_dict()
+            # JSON-safe
+            clean = {}
+            for col, stats in desc.items():
+                clean[str(col)] = {str(k): (None if pd.isna(v) else (float(v) if isinstance(v, (int, float)) else str(v)))
+                                   for k, v in stats.items()}
+            summary["describe"] = clean
+            return {"ok": True, "analysis": summary}
+        except ImportError:
+            # No pandas — read rows via stdlib CSV or openpyxl (Excel), then
+            # compute numeric summaries ourselves. Keeps the installer light.
+            rows: list = []
+            if ext in (".xlsx", ".xlsm"):
+                try:
+                    import openpyxl
+                except ImportError:
+                    return {"ok": False, "error": "Excel analysis needs openpyxl. Run: pip install openpyxl"}
+                wb = openpyxl.load_workbook(str(target), read_only=True, data_only=True)
+                ws = wb.worksheets[0]
+                for r in ws.iter_rows(values_only=True):
+                    rows.append(["" if c is None else str(c) for c in r])
+            else:
+                import csv as _csv
+                with open(target, newline="", encoding="utf-8", errors="replace") as f:
+                    rows = list(_csv.reader(f))
+            if not rows:
+                return {"ok": True, "analysis": {"rows": 0, "columns": []}}
+            header = rows[0]
+            data = rows[1:]
+            numeric_cols = {}
+            for ci, col in enumerate(header):
+                vals = []
+                for r in data:
+                    if ci < len(r):
+                        try:
+                            vals.append(float(r[ci]))
+                        except ValueError:
+                            pass
+                if vals:
+                    numeric_cols[col] = {"min": min(vals), "max": max(vals),
+                                         "sum": sum(vals), "mean": sum(vals) / len(vals), "count": len(vals)}
+            return {"ok": True, "analysis": {"rows": len(data), "columns": header, "numeric_summary": numeric_cols}}
+    except SandboxViolation as e:
+        return {"ok": False, "error": str(e)}
+    except Exception as e:
+        return {"ok": False, "error": f"Could not analyze data: {e}"}
+
+
+# ── Vision Tool ───────────────────────────────────────────────────────────────
+
+def describe_image(workspace: Path, path: str, question: str = "",
+                   context: Optional[dict] = None) -> dict[str, Any]:
+    """Understand an image: describe it or answer a question about it.
+    Sends the image to the vision model. Degrades gracefully if the active model
+    is text-only."""
+    if not context or "client" not in context or "model" not in context:
+        return {"ok": False, "error": "Vision unavailable (no model context)."}
+    try:
+        import base64
+        target = _safe_path(workspace, path)
+        if not target.exists():
+            return {"ok": False, "error": f"Image not found: {path}"}
+        ext = target.suffix.lower().lstrip(".") or "png"
+        mime = "jpeg" if ext in ("jpg", "jpeg") else ext
+        b64 = base64.b64encode(target.read_bytes()).decode()
+        prompt = question or "Describe this image in detail."
+        resp = context["client"].chat.completions.create(
+            model=context["model"],
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/{mime};base64,{b64}"}},
+                ],
+            }],
+            max_tokens=1024,
+        )
+        answer = resp.choices[0].message.content or ""
+        return {"ok": True, "description": answer[:8000]}
+    except SandboxViolation as e:
+        return {"ok": False, "error": str(e)}
+    except Exception as e:
+        return {"ok": False, "error": f"Vision failed (the current model may be text-only): {e}"}
+
+
 # ── Agent Delegation Tool ─────────────────────────────────────────────────────
 
 def spawn_subagent(workspace: Path, goal: str, context: Optional[dict] = None) -> dict[str, Any]:
@@ -562,6 +781,14 @@ TOOL_DEFINITIONS = [
          "script": {"type": "string"}, "screenshot_path": {"type": "string"}}, ["action"]),
     _fn("generate_image", "Generate an image from a text prompt and save it as a PNG in the workspace.",
         {"prompt": {"type": "string"}, "path": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"}}, ["prompt"]),
+    _fn("read_document", "Read a PDF, Word (.docx), Excel (.xlsx), CSV, or text file and return its text content.",
+        {"path": {"type": "string"}}, ["path"]),
+    _fn("generate_document", "Create a PDF or Word (.docx) document from text/markdown content. Format chosen by file extension (.pdf or .docx).",
+        {"path": {"type": "string"}, "content": {"type": "string"}, "title": {"type": "string"}}, ["path", "content"]),
+    _fn("analyze_data", "Analyze a CSV/Excel file: row count, columns, and numeric summaries (min/max/mean/sum).",
+        {"path": {"type": "string"}, "question": {"type": "string"}}, ["path"]),
+    _fn("describe_image", "Look at an image and describe it or answer a question about it (vision).",
+        {"path": {"type": "string"}, "question": {"type": "string"}}, ["path"]),
     _fn("spawn_subagent", "Delegate a focused subtask to a fresh sub-agent that shares this workspace and reports back. Use to parallelize or isolate a self-contained chunk of work.",
         {"goal": {"type": "string", "description": "Clear, self-contained subtask description"}}, ["goal"]),
 ]
@@ -626,6 +853,15 @@ def dispatch_tool(workspace: Path, name: str, args: dict, context: Optional[dict
         if name == "generate_image":
             return generate_image(workspace, args["prompt"], args.get("path", "image.png"),
                                   int(args.get("width", 1024)), int(args.get("height", 1024)))
+        if name == "read_document":
+            return read_document(workspace, args["path"])
+        if name == "generate_document":
+            _bk(args["path"])
+            return generate_document(workspace, args["path"], args.get("content", ""), args.get("title", ""))
+        if name == "analyze_data":
+            return analyze_data(workspace, args["path"], args.get("question", ""))
+        if name == "describe_image":
+            return describe_image(workspace, args["path"], args.get("question", ""), context)
         if name == "spawn_subagent":
             return spawn_subagent(workspace, args["goal"], context)
         return {"ok": False, "error": f"Unknown tool: {name}"}

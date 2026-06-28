@@ -41,6 +41,18 @@ Search the web and get a list of result titles + URLs. Use this to find informat
 ### generate_image
 Generate an image from a text prompt and save it as a PNG in the workspace.
 
+### read_document
+Read a PDF, Word (.docx), Excel (.xlsx), CSV, or text file and get its text. Use when the user gives you a document to work with.
+
+### generate_document
+Create a PDF or Word (.docx) document from your text/markdown content (chosen by the file extension). Use to produce reports, letters, summaries the user can open.
+
+### analyze_data
+Analyze a CSV or Excel file — row count, columns, and numeric summaries (totals, averages, min/max). Use for "analyze my spreadsheet" requests.
+
+### describe_image
+Look at an image the user provided and describe it or answer a question about it.
+
 ### spawn_subagent
 Delegate a focused, self-contained subtask to a fresh sub-agent that shares your workspace and reports back a summary. Use this to break a big job into independent pieces or isolate a tricky chunk.
 
