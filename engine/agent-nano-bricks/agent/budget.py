@@ -11,7 +11,10 @@ import re
 
 # Hard ceiling regardless of complexity.
 HARD_MAX = 80
-MIN_STEPS = 8
+# Generous floor — the agent stops when the task is actually DONE (done-detection),
+# not when it hits the cap. A high floor guarantees it never stops early on a task
+# that turned out to need more steps than it first looked.
+MIN_STEPS = 30
 
 # Signals that a task is large / multi-part.
 _COMPLEX_SIGNALS = [
@@ -38,7 +41,9 @@ def estimate_budget(query: str, requested_max: int | None = None) -> int:
     score += enumerated * 3
 
     budget = max(MIN_STEPS, min(score, HARD_MAX))
-    if requested_max:
-        budget = min(budget, requested_max) if requested_max < HARD_MAX else budget
-        budget = max(budget, min(requested_max, HARD_MAX))
+    # `requested_max` is treated as a CEILING only — and only if it is itself
+    # generous (>= MIN_STEPS). A small requested value must never force the agent
+    # to stop early, which is the whole point of a high floor.
+    if requested_max and requested_max >= MIN_STEPS:
+        budget = min(budget, requested_max)
     return budget

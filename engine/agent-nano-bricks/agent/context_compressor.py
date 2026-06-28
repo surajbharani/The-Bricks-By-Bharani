@@ -133,10 +133,17 @@ def maybe_compress(
         return messages, False
 
     note = _summarize_block(client, model, middle)
-    summary_msg = {
-        "role": "system",
-        "content": f"[COMPRESSED HISTORY — earlier turns this session]\n{note}",
-    }
 
-    new_messages = head + [summary_msg] + tail
+    # Fold the summary into the LAST leading system message rather than inserting
+    # a new system message mid-conversation — the latter is rejected by some
+    # strict OpenAI-compatible providers. This keeps the message sequence valid
+    # everywhere: [system(+summary), <recent tail>].
+    head = [dict(m) for m in head]  # copy so we don't mutate caller's messages
+    block = f"\n\n[COMPRESSED HISTORY — earlier turns this session]\n{note}"
+    if head and head[-1].get("role") == "system":
+        head[-1]["content"] = (head[-1].get("content") or "") + block
+    else:
+        head = head + [{"role": "system", "content": block.strip()}]
+
+    new_messages = head + tail
     return new_messages, True

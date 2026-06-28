@@ -334,6 +334,11 @@ def run_solo(
     summary = last_response[:600] if last_response else "Task completed."
     tokens_used = total_prompt_tokens + total_completion_tokens
 
+    # Emit 'done' FIRST so the dashboard shows completion immediately, then do
+    # the post-turn learning (memory write + skill distillation) in the
+    # background before the process exits. Learning must never delay the UI.
+    result = _finalize(True, summary, tokens_used, total_inr,
+                       emit_identity, solo_id, solo_name, query)
     try:
         if memory is not None:
             memory.record_turn(query, summary, True)
@@ -345,8 +350,7 @@ def run_solo(
     except Exception:
         pass
 
-    return _finalize(True, summary, tokens_used, total_inr,
-                     emit_identity, solo_id, solo_name, query)
+    return result
 
 
 def _safe_create(client: OpenAI, model: str, messages: list, max_tokens: int):
