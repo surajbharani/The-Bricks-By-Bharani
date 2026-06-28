@@ -49,7 +49,7 @@ def main() -> None:
 
     query          = req.get("query", "").strip()
     mode           = req.get("mode", "solo")
-    model          = req.get("model", "deepseek/deepseek-chat-v4-flash")
+    model          = req.get("model", "deepseek/deepseek-v4-flash")
     workspace      = Path(req.get("workspace", str(Path.home() / "Documents" / "Nano Bricks")))
     jwt            = req.get("token", "")
     openrouter_key = req.get("openrouter_key", "")

@@ -9,7 +9,7 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 uv pip install -e .
 
 # Test: send a request via stdin
-echo '{"query":"List the files in the workspace","mode":"solo","model":"deepseek/deepseek-chat-v4-flash","workspace":"/tmp/test-workspace","token":"YOUR_SUPABASE_JWT","caps":{"max_steps":5,"max_inr":1.0}}' | python serve.py
+echo '{"query":"List the files in the workspace","mode":"solo","model":"deepseek/deepseek-v4-flash","workspace":"/tmp/test-workspace","token":"YOUR_SUPABASE_JWT","caps":{"max_steps":5,"max_inr":1.0}}' | python serve.py
 ```
 
 ## Package as self-contained binary (Phase 9 — run on target OS)

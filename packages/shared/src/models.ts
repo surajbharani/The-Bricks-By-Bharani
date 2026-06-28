@@ -8,16 +8,23 @@ export interface Model {
 
 export const MODELS: Model[] = [
   {
+    id: 'deepseek/deepseek-v4-flash',
+    label: 'DeepSeek Flash',
+    description: 'Fast & smart — best for everyday tasks',
+    provider: 'deepseek',
+  },
+  {
+    id: 'deepseek/deepseek-v4-pro',
+    label: 'DeepSeek Pro',
+    description: 'Most powerful — best for complex work',
+    provider: 'deepseek',
+    reasoning: true,
+  },
+  {
     id: 'openrouter/owl-alpha',
     label: 'Owl Alpha',
     description: "OpenRouter's own model — fast and capable",
     provider: 'openrouter',
-  },
-  {
-    id: 'deepseek/deepseek-chat',
-    label: 'Nano Flash',
-    description: 'Fast & smart — best for most tasks',
-    provider: 'deepseek',
   },
 ];
 

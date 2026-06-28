@@ -52,14 +52,14 @@ pnpm deploy
 ```bash
 # Test auth rejection
 curl -X POST http://localhost:8787/v1/chat -H "Content-Type: application/json" \
-  -d '{"model":"deepseek/deepseek-chat-v4-flash","messages":[{"role":"user","content":"hi"}]}'
+  -d '{"model":"deepseek/deepseek-v4-flash","messages":[{"role":"user","content":"hi"}]}'
 # → 401
 
 # Test with real JWT
 curl -X POST http://localhost:8787/v1/chat \
   -H "Authorization: Bearer <supabase-access-token>" \
   -H "Content-Type: application/json" \
-  -d '{"model":"deepseek/deepseek-chat-v4-flash","messages":[{"role":"user","content":"Say hi"}]}' \
+  -d '{"model":"deepseek/deepseek-v4-flash","messages":[{"role":"user","content":"Say hi"}]}' \
   --no-buffer
 ```
 
