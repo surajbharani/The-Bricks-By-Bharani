@@ -729,9 +729,9 @@ with sync_playwright() as pw:
             const content = content_el?.innerText?.trim() || document.body?.innerText?.trim() || "";
 
             // Images in article
-            const imgs = [...(content_el || document).querySelectorAll("img")].map(i=>({
+            const imgs = [...(content_el || document).querySelectorAll("img")].map(i=>({{
                 src: i.src, alt: i.alt, width: i.naturalWidth, height: i.naturalHeight
-            })).filter(i=>i.src?.startsWith("http"));
+            }})).filter(i=>i.src?.startsWith("http"));
 
             return {{title, author, date, description: desc, tags,
                      content: content.slice(0, 100000),
@@ -763,34 +763,37 @@ def parse_rss(url: str, limit: int = 50) -> list:
     except Exception as e:
         raise RuntimeError(f"Feed fetch failed: {e}")
 
+    def _rss_tag(chunk, name):
+        t = re.search(rf"<{name}[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</{name}>", chunk, re.DOTALL)
+        return t.group(1).strip() if t else ""
+
+    def _atom_tag(chunk, name):
+        t = re.search(rf"<{name}[^>]*>(.*?)</{name}>", chunk, re.DOTALL)
+        return t.group(1).strip() if t else ""
+
     items = []
     # RSS items
     for m in re.finditer(r"<item>(.*?)</item>", xml, re.DOTALL):
         chunk = m.group(1)
-        def _tag(name):
-            t = re.search(rf"<{name}[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</{name}>", chunk, re.DOTALL)
-            return t.group(1).strip() if t else ""
         items.append({
-            "title": _tag("title"), "link": _tag("link") or _tag("guid"),
-            "date": _tag("pubDate") or _tag("dc:date"),
-            "summary": re.sub(r"<[^>]+>", "", _tag("description"))[:500],
-            "author": _tag("author") or _tag("dc:creator"),
+            "title": _rss_tag(chunk, "title"),
+            "link": _rss_tag(chunk, "link") or _rss_tag(chunk, "guid"),
+            "date": _rss_tag(chunk, "pubDate") or _rss_tag(chunk, "dc:date"),
+            "summary": re.sub(r"<[^>]+>", "", _rss_tag(chunk, "description"))[:500],
+            "author": _rss_tag(chunk, "author") or _rss_tag(chunk, "dc:creator"),
         })
 
     # Atom entries
     if not items:
         for m in re.finditer(r"<entry>(.*?)</entry>", xml, re.DOTALL):
             chunk = m.group(1)
-            def _tag(name):
-                t = re.search(rf"<{name}[^>]*>(.*?)</{name}>", chunk, re.DOTALL)
-                return t.group(1).strip() if t else ""
             link_m = re.search(r'<link[^>]+href=["\']([^"\']+)["\']', chunk)
             items.append({
-                "title": re.sub(r"<[^>]+>", "", _tag("title")),
-                "link": link_m.group(1) if link_m else _tag("id"),
-                "date": _tag("published") or _tag("updated"),
-                "summary": re.sub(r"<[^>]+>", "", _tag("summary") or _tag("content"))[:500],
-                "author": re.sub(r"<[^>]+>", "", _tag("author")),
+                "title": re.sub(r"<[^>]+>", "", _atom_tag(chunk, "title")),
+                "link": link_m.group(1) if link_m else _atom_tag(chunk, "id"),
+                "date": _atom_tag(chunk, "published") or _atom_tag(chunk, "updated"),
+                "summary": re.sub(r"<[^>]+>", "", _atom_tag(chunk, "summary") or _atom_tag(chunk, "content"))[:500],
+                "author": re.sub(r"<[^>]+>", "", _atom_tag(chunk, "author")),
             })
 
     return items[:limit]
@@ -1175,14 +1178,14 @@ def intercept_requests(url: str, filter_pattern: str = "", timeout: int = 30) ->
     filter_pattern = regex string to filter request URLs.
     Returns list of {url, method, resource_type, status}."""
     script = f"""
+import re as _re
 with sync_playwright() as pw:
     browser, ctx, page = new_page(pw)
-    import re as _re
     requests_log = []
     def on_request(req):
-        url = req.url
-        if not {json.dumps(filter_pattern)} or _re.search({json.dumps(filter_pattern)}, url):
-            requests_log.append({{"url": url, "method": req.method, "type": req.resource_type}})
+        req_url = req.url
+        if not {json.dumps(filter_pattern)} or _re.search({json.dumps(filter_pattern)}, req_url):
+            requests_log.append({{"url": req_url, "method": req.method, "type": req.resource_type}})
     page.on("request", on_request)
     try:
         page.goto({json.dumps(url)}, wait_until="domcontentloaded", timeout=30000)

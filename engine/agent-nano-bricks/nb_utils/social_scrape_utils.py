@@ -18,7 +18,6 @@ Quick start:
 import json
 import subprocess
 import sys
-import time
 
 # ── Stealth browser arguments (defeat most bot-detection) ─────────────────────
 _ARGS = json.dumps([
@@ -704,7 +703,7 @@ with sync_playwright() as pw:
         page.wait_for_timeout(4000)
         info = page.evaluate('''() => {{
             const name  = document.querySelector("h1")?.innerText?.trim() || document.title || "";
-            const about = document.querySelector('[data-key=\\'intro_card.short_description\\'] span")?.innerText?.trim() || "";
+            const about = document.querySelector("[data-key=\\'intro_card.short_description\\'] span")?.innerText?.trim() || "";
             const spans = [...document.querySelectorAll("span")].map(s => s.innerText.trim());
             const likes_idx = spans.findIndex(s => s.includes("people like this"));
             const likes = likes_idx > 0 ? spans[likes_idx-1] : "";
