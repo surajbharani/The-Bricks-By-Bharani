@@ -236,7 +236,7 @@ export const useRun = create<RunState>()(
       onRehydrateStorage: () => (_state, error) => {
         if (error) {
           console.error('[useRun] Failed to rehydrate, clearing store:', error);
-          clearStorageKey('nano-bricks-run');
+          clearStorageKey('nano-bricks-run').catch(() => {});
         }
       },
     }

@@ -307,7 +307,7 @@ export const useSession = create<SessionState>()(
       onRehydrateStorage: () => (_state, error) => {
         if (error) {
           console.error('[useSession] Failed to rehydrate, clearing store:', error);
-          clearStorageKey('nano-bricks-session');
+          clearStorageKey('nano-bricks-session').catch(() => {});
         }
       },
       partialize: (s) => ({

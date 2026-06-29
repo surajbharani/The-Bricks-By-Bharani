@@ -116,7 +116,7 @@ export const useHistory = create<HistoryState>()(
       onRehydrateStorage: () => (_state, error) => {
         if (error) {
           console.error('[useHistory] Failed to rehydrate, clearing store:', error);
-          clearStorageKey('nano-bricks-history');
+          clearStorageKey('nano-bricks-history').catch(() => {});
         }
       },
       // Defensive: a single malformed conversation must never throw during

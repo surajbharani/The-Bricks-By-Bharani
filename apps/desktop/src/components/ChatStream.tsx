@@ -206,7 +206,9 @@ function MessageBubble({ msg, thinking, isLastAssistant, isStreaming, onFeedback
               {isUser ? (
                 <span className="whitespace-pre-wrap break-words">{msg.content}</span>
               ) : (
-                <div className="prose prose-invert max-w-none
+                <div
+                  style={{ fontSize: '19px' }}
+                  className="prose prose-invert max-w-none
                   prose-p:my-1 prose-p:leading-relaxed
                   prose-headings:text-text-hi prose-headings:font-semibold
                   prose-a:text-red-core prose-a:no-underline hover:prose-a:underline
