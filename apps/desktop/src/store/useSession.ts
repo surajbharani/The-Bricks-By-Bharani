@@ -5,7 +5,7 @@ import { useHistory } from './useHistory';
 import { useProjects } from './useProjects';
 import { useRun } from './useRun';
 import { uuid } from '../lib/uuid';
-import { deviceStorage } from '../lib/storage';
+import { deviceStorage, clearStorageKey } from '../lib/storage';
 
 export type AppMode = 'chat' | 'agent';
 export type AgentMode = 'solo' | 'swarm';
@@ -307,7 +307,7 @@ export const useSession = create<SessionState>()(
       onRehydrateStorage: () => (_state, error) => {
         if (error) {
           console.error('[useSession] Failed to rehydrate, clearing store:', error);
-          localStorage.removeItem('nano-bricks-session');
+          clearStorageKey('nano-bricks-session');
         }
       },
       partialize: (s) => ({

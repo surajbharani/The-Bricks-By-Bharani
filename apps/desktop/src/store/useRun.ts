@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AgentEvent } from '@nano-bricks/shared';
-import { deviceStorage } from '../lib/storage';
+import { deviceStorage, clearStorageKey } from '../lib/storage';
 
 export interface RunStep {
   i: number;
@@ -236,7 +236,7 @@ export const useRun = create<RunState>()(
       onRehydrateStorage: () => (_state, error) => {
         if (error) {
           console.error('[useRun] Failed to rehydrate, clearing store:', error);
-          localStorage.removeItem('nano-bricks-run');
+          clearStorageKey('nano-bricks-run');
         }
       },
     }

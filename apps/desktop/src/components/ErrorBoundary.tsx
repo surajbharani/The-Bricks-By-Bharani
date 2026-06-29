@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from 'react';
+import { clearStorageKey } from '../lib/storage';
 
 // Volatile stores that are safe to wipe as a last resort. Deliberately EXCLUDES
 // 'nano-bricks-onboarding' (welcome tour), 'nano-bricks-dev' (dev login) and
@@ -17,7 +18,9 @@ const STORE_KEYS = [
 
 function clearVolatileStores() {
   STORE_KEYS.forEach((k) => {
-    try { localStorage.removeItem(k); } catch { /* ignore */ }
+    clearStorageKey(k).catch(() => {
+      try { localStorage.removeItem(k); } catch { /* ignore */ }
+    });
   });
 }
 

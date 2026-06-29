@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Message } from './useSession';
 import { uuid } from '../lib/uuid';
-import { deviceStorage } from '../lib/storage';
+import { deviceStorage, clearStorageKey } from '../lib/storage';
 
 // ── Stored types ──────────────────────────────────────────────────────────────
 
@@ -116,7 +116,7 @@ export const useHistory = create<HistoryState>()(
       onRehydrateStorage: () => (_state, error) => {
         if (error) {
           console.error('[useHistory] Failed to rehydrate, clearing store:', error);
-          localStorage.removeItem('nano-bricks-history');
+          clearStorageKey('nano-bricks-history');
         }
       },
       // Defensive: a single malformed conversation must never throw during

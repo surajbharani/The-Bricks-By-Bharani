@@ -6,6 +6,18 @@ use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 use base64::Engine as _;
 
+/// Returns ~/Documents/Nano Bricks — the single user-visible root for all app data.
+fn nano_bricks_dir() -> PathBuf {
+    dirs::document_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("Nano Bricks")
+}
+
+/// Returns ~/Documents/Nano Bricks/data — where all store JSON files live.
+fn data_dir() -> PathBuf {
+    nano_bricks_dir().join("data")
+}
+
 // Shared handle to the currently-running sidecar so a separate command can
 // write the user's answer to its stdin (human-in-the-loop ask_user / approvals).
 #[derive(Default)]
@@ -32,9 +44,7 @@ pub struct AgentRunRequest {
 async fn agent_run(app: AppHandle, state: State<'_, AgentChild>, request: AgentRunRequest) -> Result<(), String> {
     let workspace = match &request.workspace {
         Some(p) if !p.is_empty() => PathBuf::from(p),
-        _ => dirs::document_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("Nano Bricks"),
+        _ => nano_bricks_dir(),
     };
     std::fs::create_dir_all(&workspace).ok();
 
@@ -182,9 +192,7 @@ fn run_code(lang: String, code: String) -> Result<String, String> {
 /// Returns the full absolute path of the written file.
 #[tauri::command]
 async fn write_to_workspace(filename: String, data_b64: String) -> Result<String, String> {
-    let workspace = dirs::document_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("Nano Bricks");
+    let workspace = nano_bricks_dir();
     std::fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
     // Strip data URL prefix (e.g. "data:image/png;base64,") if present
     let b64 = if let Some(idx) = data_b64.find(',') { &data_b64[idx + 1..] } else { &data_b64 };
@@ -198,6 +206,42 @@ async fn write_to_workspace(filename: String, data_b64: String) -> Result<String
 #[tauri::command]
 async fn read_workspace_file(path: String) -> Result<Vec<u8>, String> {
     std::fs::read(&path).map_err(|e| e.to_string())
+}
+
+// ── Device-local data file storage ──────────────────────────────────────────
+// All app state (chat history, memory, projects, settings, etc.) is stored as
+// JSON files under ~/Documents/Nano Bricks/data/ — one file per Zustand store.
+// These are plain, user-visible files that can be backed up, inspected, or
+// transferred to another device.
+
+/// Read a Zustand store's JSON from disk. Returns null if the file doesn't exist.
+#[tauri::command]
+async fn read_data_file(key: String) -> Result<Option<String>, String> {
+    let path = data_dir().join(format!("{}.json", key));
+    if path.exists() {
+        std::fs::read_to_string(&path).map(Some).map_err(|e| e.to_string())
+    } else {
+        Ok(None)
+    }
+}
+
+/// Write (overwrite) a Zustand store's JSON to disk. Creates the data dir if needed.
+#[tauri::command]
+async fn write_data_file(key: String, value: String) -> Result<(), String> {
+    let dir = data_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join(format!("{}.json", key)), value.as_bytes()).map_err(|e| e.to_string())
+}
+
+/// Delete a Zustand store's JSON file (used for crash recovery / clear-all).
+#[tauri::command]
+async fn remove_data_file(key: String) -> Result<(), String> {
+    let path = data_dir().join(format!("{}.json", key));
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -217,7 +261,11 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![agent_run, agent_answer, agent_stop, run_code, write_to_workspace, read_workspace_file])
+        .invoke_handler(tauri::generate_handler![
+            agent_run, agent_answer, agent_stop, run_code,
+            write_to_workspace, read_workspace_file,
+            read_data_file, write_data_file, remove_data_file,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
