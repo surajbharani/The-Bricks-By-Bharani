@@ -157,7 +157,7 @@ export function AgentComposer() {
     } catch (err) {
       applyEvent({ t: 'error', message: `Failed to start agent: ${err}` });
     } finally {
-      unlisten();
+      unlistenRef.current?.();
       unlistenRef.current = null;
     }
   };

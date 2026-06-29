@@ -16,12 +16,14 @@ const STORE_KEYS = [
   'nano-bricks-scheduler',
 ];
 
-function clearVolatileStores() {
-  STORE_KEYS.forEach((k) => {
-    clearStorageKey(k).catch(() => {
-      try { localStorage.removeItem(k); } catch { /* ignore */ }
-    });
-  });
+async function clearVolatileStores() {
+  await Promise.allSettled(
+    STORE_KEYS.map((k) =>
+      clearStorageKey(k).catch(() => {
+        try { localStorage.removeItem(k); } catch { /* ignore */ }
+      })
+    )
+  );
 }
 
 function getAttempt(): number {
@@ -79,10 +81,10 @@ export class ErrorBoundary extends Component<Props, State> {
       this.reloadSoon();
     } else if (attempt === 1) {
       // Clean reload didn't help → persisted state is likely corrupt. Wipe the
-      // volatile stores (login/onboarding kept) and reload.
-      clearVolatileStores();
+      // volatile stores (login/onboarding kept) then reload after all async
+      // file-delete operations have had time to complete.
       setAttempt(2);
-      this.reloadSoon();
+      clearVolatileStores().then(() => this.reloadSoon());
     } else {
       // Two auto-attempts failed → stop reloading (avoid a loop) and let the
       // user decide.
@@ -90,14 +92,15 @@ export class ErrorBoundary extends Component<Props, State> {
     }
   }
 
-  reloadSoon() {
-    setTimeout(() => window.location.reload(), 600);
+  reloadSoon(delay = 600) {
+    setTimeout(() => window.location.reload(), delay);
   }
 
   handleManualClear = () => {
-    clearVolatileStores();
-    clearAttempt();
-    window.location.reload();
+    clearVolatileStores().then(() => {
+      clearAttempt();
+      window.location.reload();
+    });
   };
 
   render() {

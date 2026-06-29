@@ -111,7 +111,7 @@ async fn agent_run(app: AppHandle, state: State<'_, AgentChild>, request: AgentR
 // JSON line to the running sidecar's stdin.
 #[tauri::command]
 fn agent_answer(state: State<'_, AgentChild>, answer: String) -> Result<(), String> {
-    let mut guard = state.0.lock().unwrap();
+    let mut guard = state.0.lock().map_err(|_| "Agent state lock poisoned".to_string())?;
     if let Some(child) = guard.as_mut() {
         let line = serde_json::json!({ "answer": answer }).to_string();
         child
@@ -125,9 +125,10 @@ fn agent_answer(state: State<'_, AgentChild>, answer: String) -> Result<(), Stri
 
 #[tauri::command]
 fn agent_stop(state: State<'_, AgentChild>) {
-    let mut guard = state.0.lock().unwrap();
-    if let Some(child) = guard.take() {
-        child.kill().ok();
+    if let Ok(mut guard) = state.0.lock() {
+        if let Some(child) = guard.take() {
+            child.kill().ok();
+        }
     }
 }
 

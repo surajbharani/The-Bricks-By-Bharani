@@ -116,6 +116,10 @@ def main() -> None:
     caps.setdefault("max_steps", 60)
     caps.setdefault("max_concurrency", 6)
 
+    if not query.strip() and not attachments:
+        _emit_error("Query is empty.")
+        return
+
     # Inject attachment context into the query so the agent knows the files exist
     if attachments:
         lines = ["", "", "### Attached files (already copied into your workspace):"]
@@ -125,10 +129,6 @@ def main() -> None:
             lines.append(f"- `{path}` ({kind})")
         lines.append("Use `describe_image` for images or `read_document` for documents. Reference them by the path shown above.")
         query = query + "\n".join(lines)
-
-    if not query.strip():
-        _emit_error("Query is empty.")
-        return
 
     # ── Build client ──────────────────────────────────────────────────────────
     from providers.proxy import make_client, make_openrouter_client, make_deepseek_client, normalize_model

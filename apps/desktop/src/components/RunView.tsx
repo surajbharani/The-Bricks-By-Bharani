@@ -103,7 +103,7 @@ export function RunView() {
         className="flex justify-end mb-4"
       >
         <div className="max-w-[75%] px-4 py-2.5 rounded-xl bg-red-core/15 border border-red-core/25">
-          <p className="text-text-hi" style={{ fontSize: '19px' }}>{query}</p>
+          <p className="text-text-hi whitespace-pre-wrap" style={{ fontSize: '19px' }}>{query}</p>
         </div>
       </motion.div>
 

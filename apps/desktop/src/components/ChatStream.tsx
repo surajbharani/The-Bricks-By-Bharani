@@ -207,7 +207,7 @@ function MessageBubble({ msg, thinking, isLastAssistant, isStreaming, onFeedback
                 <span className="whitespace-pre-wrap break-words">{msg.content}</span>
               ) : (
                 <div
-                  style={{ fontSize: '19px' }}
+                  style={{ fontSize: 'var(--chat-font-size, 19px)' }}
                   className="prose prose-invert max-w-none
                   prose-p:my-1 prose-p:leading-relaxed
                   prose-headings:text-text-hi prose-headings:font-semibold

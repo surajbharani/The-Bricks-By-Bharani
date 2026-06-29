@@ -24,7 +24,7 @@ export function TokenStream({ text, streaming }: Props) {
       <p className="text-xs text-text-lo mb-1 font-mono uppercase tracking-wider">Output</p>
       <pre
         className="text-text-hi whitespace-pre-wrap leading-relaxed"
-        style={{ fontFamily: 'var(--mono)', fontSize: '19px' }}
+        style={{ fontFamily: 'var(--mono)', fontSize: 'var(--chat-font-size, 19px)' }}
       >
         {text}
         {streaming && (
