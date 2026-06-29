@@ -288,10 +288,14 @@ def shell_exec(workspace: Path, command: str, timeout: int = 120) -> dict[str, A
     try:
         if "../" in command or "..\\" in command:
             return {"ok": False, "error": "Path traversal in command is not allowed."}
+        # Make _nb_utils importable from shell Python scripts via PYTHONPATH
+        nb_path = str(workspace / "_nb_utils")
+        existing_pypath = os.environ.get("PYTHONPATH", "")
+        pypath = nb_path + os.pathsep + existing_pypath if existing_pypath else nb_path
         result = subprocess.run(
             command, shell=True, cwd=str(workspace),
             capture_output=True, text=True, timeout=timeout,
-            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONPATH": pypath},
         )
         output = (result.stdout + result.stderr).strip()
         if len(output) > 12000:
@@ -306,8 +310,11 @@ def shell_exec(workspace: Path, command: str, timeout: int = 120) -> dict[str, A
 def run_python(workspace: Path, code: str, timeout: int = 120) -> dict[str, Any]:
     """Run a Python snippet directly (sub-script). Output capped at 12K chars."""
     try:
+        # Prepend _nb_utils to sys.path so `import csv_utils` etc. work out of the box
+        nb_path = str(workspace / "_nb_utils")
+        preamble = f"import sys; sys.path.insert(0, {nb_path!r})\n"
         result = subprocess.run(
-            ["python3", "-c", code], cwd=str(workspace),
+            ["python3", "-c", preamble + code], cwd=str(workspace),
             capture_output=True, text=True, timeout=timeout,
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )

@@ -32,6 +32,7 @@ Protocol (stdin → stdout):
     {"t": "error",      "message": "..."}
 """
 import json
+import shutil
 import sys
 import os
 from pathlib import Path
@@ -143,6 +144,16 @@ def main() -> None:
         return
 
     workspace.mkdir(parents=True, exist_ok=True)
+
+    # ── Pre-written utility library → workspace/_nb_utils/ ───────────────────
+    # Copy the bundled nb_utils/ folder into the workspace so the agent can do
+    # `import csv_utils` (etc.) without writing boilerplate helper code itself.
+    try:
+        _nb_src = Path(__file__).parent / "nb_utils"
+        if _nb_src.is_dir():
+            shutil.copytree(str(_nb_src), str(workspace / "_nb_utils"), dirs_exist_ok=True)
+    except Exception:
+        pass
 
     # ── Persistent memory + skills (per-user, derived from the auth token) ────
     memory = None

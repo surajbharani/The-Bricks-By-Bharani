@@ -96,6 +96,31 @@ Browser workflow example:
 4. `click` the submit button
 5. `screenshot` to verify success
 
+## Pre-written Utility Library (_nb_utils/)
+
+A folder `_nb_utils/` is **always present in your workspace** with pre-written Python
+utility modules. In `run_python`, they are already on `sys.path` — just import directly:
+
+| Module | What it provides |
+|--------|-----------------|
+| `import csv_utils` | `read(path)`, `write(path, rows)`, `filter_rows`, `search_rows`, `group_by`, `summarize`, `to_json` |
+| `import json_utils` | `load(path)`, `save(path, data)`, `pretty(data)`, `merge(*dicts)`, `deep_merge`, `flatten`, `get_path` |
+| `import text_utils` | `extract`, `extract_all`, `replace`, `replace_re`, `clean`, `truncate`, `slugify`, `extract_emails`, `extract_urls`, `extract_numbers` |
+| `import web_utils` | `get(url)`, `get_json(url)`, `post_json(url, payload)`, `download_file(url, path)`, `safe_get`, `build_url` |
+| `import data_stats` | `mean`, `median`, `stddev`, `percentile`, `summarize(vals)`, `histogram`, `normalize`, `correlation` |
+| `import file_utils` | `find(root, pattern)`, `read_text`, `write_text`, `batch_rename`, `batch_replace_in_files`, `size_report`, `diff_lines` |
+| `import md_utils` | `heading`, `table`, `table_from_dicts`, `code_block`, `bullet_list`, `numbered_list`, `report(title, sections)` |
+| `import excel_utils` | `read(path)`, `read_all_sheets(path)`, `write(path, rows)`, `write_multi_sheet` |
+| `import pdf_utils` | `read(path)`, `read_pages(path)`, `generate(path, content, title)` |
+| `import html_utils` | `get_text(html)`, `get_links(html)`, `get_tables(html)`, `get_table_as_dicts(html)`, `get_headings`, `get_meta` |
+| `import scrape_utils` | `get_page_text(url)`, `get_page_html(url)`, `scrape_table(url)`, `scrape_links(url)`, `scroll_and_scrape(url)`, `scrape_all_pages(url, next_sel)`, `fill_and_submit(url, fields, submit_sel)`, `screenshot(url, path)`, `evaluate_js(url, js)`, `scrape_element_text(url, sel)` |
+
+**Scraping note:** `scrape_utils` uses headless Playwright (same engine as `browser_action`).
+Use it for JS-rendered pages, paginated results, infinite scroll, and form submissions.
+Use `web_utils.get()` + `html_utils` for faster static-HTML scraping.
+
+**Rule: NEVER rewrite these utilities from scratch.** Always import from `_nb_utils` first.
+
 ## Important Rules
 1. Always complete the full task — do not stop halfway.
 2. To change existing files, use `edit_file` (precise) rather than rewriting the whole file.
