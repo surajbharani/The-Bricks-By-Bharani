@@ -61,7 +61,8 @@ export async function clearStorageKey(key: string): Promise<void> {
 }
 
 /** Zustand-compatible async device-backed storage. */
-export const deviceStorage = createJSONStorage<string>(() => ({
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const deviceStorage = createJSONStorage<any>(() => ({
   getItem,
   setItem,
   removeItem,

@@ -118,7 +118,7 @@ def main() -> None:
 
     # Inject attachment context into the query so the agent knows the files exist
     if attachments:
-        lines = ["\n\n### Attached files (already copied into your workspace):"]
+        lines = ["", "", "### Attached files (already copied into your workspace):"]
         for a in attachments:
             path = a.get("path", a.get("name", ""))
             kind = a.get("kind", "file")
