@@ -72,8 +72,12 @@ export function AgentComposer() {
 
   const send = async () => {
     const trimmed = text.trim();
-    if (!trimmed || isRunning) return;
     const currentAttachments = [...attachments];
+    if ((!trimmed && currentAttachments.length === 0) || isRunning) return;
+
+    // If user sent only attachments with no text, use a sensible default task
+    const effectiveTrimmed = trimmed || 'Please work with the attached files.';
+
     setText('');
     setAttachments([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -83,9 +87,9 @@ export function AgentComposer() {
     const contextPrefix = recentHistory.length > 0
       ? recentHistory.map((h) => `User: ${h.query}\nAssistant: ${h.response}`).join('\n\n') + '\n\n'
       : '';
-    const queryWithContext = contextPrefix ? `${contextPrefix}User: ${trimmed}` : trimmed;
+    const queryWithContext = contextPrefix ? `${contextPrefix}User: ${effectiveTrimmed}` : effectiveTrimmed;
 
-    startRun(trimmed);
+    startRun(effectiveTrimmed);
 
     if (!IS_TAURI) {
       // Dev stub — simulate a quick done event

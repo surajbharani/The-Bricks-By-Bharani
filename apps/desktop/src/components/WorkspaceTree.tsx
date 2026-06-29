@@ -31,8 +31,11 @@ async function downloadFile(fullPath: string, name: string) {
     const a = document.createElement('a');
     a.href = url;
     a.download = name;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    // Delay revoke so the browser has time to start the download
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (err) {
     console.error('[WorkspaceTree] download failed:', err);
   }
@@ -48,7 +51,9 @@ export function WorkspaceTree({ files, workspaceDir }: Props) {
         <AnimatePresence initial={false}>
           {files.map((f, idx) => {
             const name = basename(f.path);
-            const fullPath = workspaceDir ? `${workspaceDir}/${f.path}` : f.path;
+            // If path is already absolute, use it directly; otherwise join with workspaceDir
+            const isAbsolute = f.path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(f.path);
+            const fullPath = (isAbsolute || !workspaceDir) ? f.path : `${workspaceDir}/${f.path}`;
             return (
               <motion.div
                 key={`${f.action}-${f.path}-${idx}`}
