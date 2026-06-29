@@ -250,8 +250,8 @@ export function AgentComposer() {
           placeholder={placeholder}
           rows={1}
           disabled={isRunning}
-          className="flex-1 resize-none bg-transparent text-sm text-text-hi placeholder-text-lo outline-none leading-relaxed"
-          style={{ fontFamily: 'var(--display)', maxHeight: '160px' }}
+          className="flex-1 resize-none bg-transparent text-text-hi placeholder-text-lo outline-none leading-relaxed"
+          style={{ fontFamily: 'var(--display)', maxHeight: '160px', fontSize: '19px' }}
         />
 
         {isRunning ? (

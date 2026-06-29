@@ -23,8 +23,8 @@ export function TokenStream({ text, streaming }: Props) {
     >
       <p className="text-xs text-text-lo mb-1 font-mono uppercase tracking-wider">Output</p>
       <pre
-        className="text-sm text-text-hi whitespace-pre-wrap leading-relaxed"
-        style={{ fontFamily: 'var(--mono)' }}
+        className="text-text-hi whitespace-pre-wrap leading-relaxed"
+        style={{ fontFamily: 'var(--mono)', fontSize: '19px' }}
       >
         {text}
         {streaming && (

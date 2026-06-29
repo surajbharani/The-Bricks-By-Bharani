@@ -79,7 +79,7 @@ export function RunView() {
         <div key={`turn-${idx}`} className="mb-6">
           <div className="flex justify-end mb-2">
             <div className="max-w-[75%] px-4 py-2.5 rounded-xl bg-red-core/15 border border-red-core/25">
-              <p className="text-sm text-text-hi whitespace-pre-wrap">{turn.query}</p>
+              <p className="text-text-hi whitespace-pre-wrap" style={{ fontSize: '19px' }}>{turn.query}</p>
             </div>
           </div>
           <div className="rounded-xl border border-border-hair overflow-hidden">
@@ -88,7 +88,7 @@ export function RunView() {
               <span className="text-[10px] font-mono text-text-lo uppercase tracking-widest">Task Complete</span>
             </div>
             <div className="p-4 bg-bg-panel">
-              <p className="text-sm text-text-hi whitespace-pre-wrap leading-relaxed">{turn.response}</p>
+              <p className="text-text-hi whitespace-pre-wrap leading-relaxed" style={{ fontSize: '19px' }}>{turn.response}</p>
             </div>
           </div>
         </div>
@@ -103,7 +103,7 @@ export function RunView() {
         className="flex justify-end mb-4"
       >
         <div className="max-w-[75%] px-4 py-2.5 rounded-xl bg-red-core/15 border border-red-core/25">
-          <p className="text-sm text-text-hi">{query}</p>
+          <p className="text-text-hi" style={{ fontSize: '19px' }}>{query}</p>
         </div>
       </motion.div>
 

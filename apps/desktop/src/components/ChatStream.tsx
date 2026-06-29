@@ -199,14 +199,14 @@ function MessageBubble({ msg, thinking, isLastAssistant, isStreaming, onFeedback
               }`}
               style={{
                 padding: 'var(--bubble-py, 0.75rem) var(--bubble-px, 1rem)',
-                fontSize: 'var(--chat-font-size, 14px)',
+                fontSize: 'var(--chat-font-size, 19px)',
                 fontFamily: 'var(--chat-font-family, var(--display), "Nunito", system-ui, sans-serif)',
               }}
             >
               {isUser ? (
                 <span className="whitespace-pre-wrap break-words">{msg.content}</span>
               ) : (
-                <div className="prose prose-invert prose-sm max-w-none
+                <div className="prose prose-invert max-w-none
                   prose-p:my-1 prose-p:leading-relaxed
                   prose-headings:text-text-hi prose-headings:font-semibold
                   prose-a:text-red-core prose-a:no-underline hover:prose-a:underline
