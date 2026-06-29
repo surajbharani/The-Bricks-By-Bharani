@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useSession } from '../store/useSession';
@@ -10,12 +10,20 @@ import type { AgentEvent } from '@nano-bricks/shared';
 
 const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
+interface AttachmentChip {
+  name: string;
+  kind: 'image' | 'file';
+  workspacePath: string;
+}
+
 export function AgentComposer() {
   const { agentMode, model, agentAskEnabled } = useSession();
   const { status, startRun, applyEvent, resetRun, agentHistory } = useRun();
   const { session } = useAuth();
   const [text, setText] = useState('');
+  const [attachments, setAttachments] = useState<AttachmentChip[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
 
   const isRunning = status === 'planning' || status === 'running';
@@ -26,10 +34,52 @@ export function AgentComposer() {
     };
   }, []);
 
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files ?? []);
+    if (!picked.length) return;
+    // Reset input so the same file can be re-attached after removal
+    e.target.value = '';
+
+    const added: AttachmentChip[] = [];
+
+    for (const file of picked) {
+      const kind: AttachmentChip['kind'] = file.type.startsWith('image/') ? 'image' : 'file';
+      let workspacePath = file.name;
+
+      if (IS_TAURI) {
+        try {
+          // Read file as base64 data URL, then copy into workspace via Tauri command
+          const dataUrl = await readFileAsDataUrl(file);
+          const fullPath: string = await invoke('write_to_workspace', {
+            filename: file.name,
+            data_b64: dataUrl,
+          });
+          workspacePath = fullPath;
+        } catch (err) {
+          console.error('[AgentComposer] copy to workspace failed:', err);
+        }
+      }
+
+      added.push({ name: file.name, kind, workspacePath });
+    }
+
+    setAttachments((prev) => [...prev, ...added]);
+  };
+
+  const removeAttachment = (idx: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  };
+
   const send = async () => {
     const trimmed = text.trim();
-    if (!trimmed || isRunning) return;
+    const currentAttachments = [...attachments];
+    if ((!trimmed && currentAttachments.length === 0) || isRunning) return;
+
+    // If user sent only attachments with no text, use a sensible default task
+    const effectiveTrimmed = trimmed || 'Please work with the attached files.';
+
     setText('');
+    setAttachments([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
     // Build context from the most recent turns so the agent remembers the conversation
@@ -37,9 +87,9 @@ export function AgentComposer() {
     const contextPrefix = recentHistory.length > 0
       ? recentHistory.map((h) => `User: ${h.query}\nAssistant: ${h.response}`).join('\n\n') + '\n\n'
       : '';
-    const queryWithContext = contextPrefix ? `${contextPrefix}User: ${trimmed}` : trimmed;
+    const queryWithContext = contextPrefix ? `${contextPrefix}User: ${effectiveTrimmed}` : effectiveTrimmed;
 
-    startRun(trimmed);
+    startRun(effectiveTrimmed);
 
     if (!IS_TAURI) {
       // Dev stub — simulate a quick done event
@@ -76,8 +126,6 @@ export function AgentComposer() {
     const openrouterKey = (import.meta.env.VITE_OPENROUTER_KEY as string | undefined) ?? '';
     const deepseekKey = (import.meta.env.VITE_DEEPSEEK_KEY as string | undefined) ?? '';
 
-    // Listen for agent-event Tauri events. The completed turn is appended to
-    // agentHistory atomically inside applyEvent() on the 'done'/'error' event.
     const unlisten = await listen<string>('agent-event', (ev) => {
       try {
         const parsed: AgentEvent = JSON.parse(ev.payload);
@@ -99,12 +147,17 @@ export function AgentComposer() {
           openrouter_key: openrouterKey,
           deepseek_key: deepseekKey,
           caps: { max_steps: 20, max_concurrency: 4, max_inr: 50.0, allow_ask: agentAskEnabled },
+          attachments: currentAttachments.map((a) => ({
+            name: a.name,
+            path: a.workspacePath,
+            kind: a.kind,
+          })),
         },
       });
     } catch (err) {
       applyEvent({ t: 'error', message: `Failed to start agent: ${err}` });
     } finally {
-      unlisten();
+      unlistenRef.current?.();
       unlistenRef.current = null;
     }
   };
@@ -139,7 +192,55 @@ export function AgentComposer() {
 
   return (
     <div className="px-4 pb-4">
+      {/* Attachment chips */}
+      <AnimatePresence>
+        {attachments.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="flex flex-wrap gap-1.5 mb-2"
+          >
+            {attachments.map((a, idx) => (
+              <div
+                key={idx}
+                className="flex items-center gap-1 px-2 py-1 rounded-md bg-bg-elevated border border-border-hair text-xs text-text-hi"
+              >
+                {a.kind === 'image' ? <ImageIcon /> : <FileIcon />}
+                <span className="max-w-[120px] truncate">{a.name}</span>
+                <button
+                  onClick={() => removeAttachment(idx)}
+                  className="ml-0.5 text-text-lo hover:text-text-hi transition-colors"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="relative flex items-end gap-2 bg-bg-elevated border border-border-hair rounded-xl px-4 py-3 focus-within:border-red-core/40 focus-within:shadow-red-glow transition-all duration-200">
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,.pdf,.docx,.csv,.txt,.md,.json,.xlsx,.py,.js,.ts,.html,.css"
+          className="hidden"
+          onChange={handleFileSelect}
+        />
+
+        {/* Attach button */}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isRunning}
+          title="Attach files or images"
+          className="flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-text-lo hover:text-text-hi hover:bg-white/5 transition-colors duration-150 disabled:opacity-40"
+        >
+          <PaperclipIcon />
+        </button>
+
         <textarea
           ref={textareaRef}
           value={text}
@@ -149,8 +250,8 @@ export function AgentComposer() {
           placeholder={placeholder}
           rows={1}
           disabled={isRunning}
-          className="flex-1 resize-none bg-transparent text-sm text-text-hi placeholder-text-lo outline-none leading-relaxed"
-          style={{ fontFamily: 'var(--display)', maxHeight: '160px' }}
+          className="flex-1 resize-none bg-transparent text-text-hi placeholder-text-lo outline-none leading-relaxed"
+          style={{ fontFamily: 'var(--display)', maxHeight: '160px', fontSize: '19px' }}
         />
 
         {isRunning ? (
@@ -165,12 +266,12 @@ export function AgentComposer() {
         ) : (
           <motion.button
             onClick={send}
-            disabled={!text.trim()}
+            disabled={!text.trim() && attachments.length === 0}
             whileTap={{ scale: 0.92 }}
             className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-150"
             style={{
-              background: text.trim() ? '#FF1F2E' : '#26262B',
-              cursor: text.trim() ? 'pointer' : 'not-allowed',
+              background: (text.trim() || attachments.length > 0) ? '#FF1F2E' : '#26262B',
+              cursor: (text.trim() || attachments.length > 0) ? 'pointer' : 'not-allowed',
             }}
           >
             <SendIcon />
@@ -178,10 +279,19 @@ export function AgentComposer() {
         )}
       </div>
       <p className="text-center text-xs text-text-lo mt-2 opacity-50">
-        Enter to send · Shift+Enter for new line · agent runs in your workspace
+        Enter to send · Shift+Enter for new line · 📎 attach files · agent runs in your workspace
       </p>
     </div>
   );
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 function SendIcon() {
@@ -196,6 +306,39 @@ function StopIcon() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
       <rect x="1" y="1" width="8" height="8" rx="1" fill="#F4F4F6" />
+    </svg>
+  );
+}
+
+function PaperclipIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <path
+        d="M12.5 6.5L6.5 12.5C5.12 13.88 2.88 13.88 1.5 12.5C0.12 11.12 0.12 8.88 1.5 7.5L7.5 1.5C8.33 0.67 9.67 0.67 10.5 1.5C11.33 2.33 11.33 3.67 10.5 4.5L4.5 10.5C4.09 10.91 3.41 10.91 3 10.5C2.59 10.09 2.59 9.41 3 9L8.5 3.5"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ImageIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+      <rect x="0.5" y="0.5" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1" />
+      <circle cx="3.5" cy="3.5" r="1" fill="currentColor" />
+      <path d="M0.5 7.5L3 5L5 7L7.5 4.5L10.5 7.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function FileIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+      <path d="M2 1h5l3 3v6H2V1z" stroke="currentColor" strokeWidth="1" strokeLinejoin="round" />
+      <path d="M7 1v3h3" stroke="currentColor" strokeWidth="1" strokeLinejoin="round" />
     </svg>
   );
 }

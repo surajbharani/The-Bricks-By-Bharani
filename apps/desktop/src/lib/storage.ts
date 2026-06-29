@@ -1,58 +1,69 @@
 import { createJSONStorage } from 'zustand/middleware';
+import { invoke } from '@tauri-apps/api/core';
 
-// ── Device-backed storage for every persisted store ──────────────────────────
+// ── Device-backed file storage ────────────────────────────────────────────────
+// All persisted stores (chat history, agent runs, memory, projects, theme, etc.)
+// are saved to ~/Documents/Nano Bricks/data/<key>.json — user-visible, easy to
+// back up, and device-local. Falls back to localStorage in browser dev mode.
 //
-// In the Nano Bricks desktop app this is the user's OWN device storage: the
-// Tauri WebView persists localStorage to a file on disk inside the app's data
-// directory (Windows: %APPDATA%\com.nanobricks.app, macOS: ~/Library). It is
-// NOT cloud storage and it survives restarts. Everything that uses this —
-// chat history, agent runs, memory, projects, theme, scheduler — lives on the
-// user's machine.
-//
-// Hardening on top of plain localStorage:
-//  • Writes never throw. A quota or serialization error is caught and the value
-//    is kept in an in-memory mirror, so a failed save can NEVER crash the app
-//    (this is exactly the kind of throw that used to bounce users out of Agent
-//    mode mid-run).
-//  • Reads fall back to the in-memory mirror if localStorage is unavailable.
+// On first launch after update (files don't exist yet), reads fall through to
+// localStorage for automatic zero-friction migration.
 
+const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 const memoryMirror = new Map<string, string>();
 
-function getItem(key: string): string | null {
-  // Prefer the in-memory mirror: it always holds the most recent value written
-  // this session (e.g. after a disk write failed, the mirror is newer than the
-  // stale value still on disk). On a fresh launch the mirror is empty, so we
-  // correctly read the persisted value from disk.
+async function getItem(key: string): Promise<string | null> {
   const mirrored = memoryMirror.get(key);
   if (mirrored !== undefined) return mirrored;
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
+
+  if (IS_TAURI) {
+    try {
+      const value = await invoke<string | null>('read_data_file', { key });
+      if (value != null) {
+        memoryMirror.set(key, value);
+        return value;
+      }
+      // null = file doesn't exist yet → fall through to localStorage for migration
+    } catch { /* fall through */ }
   }
+
+  try { return localStorage.getItem(key); } catch { return null; }
 }
 
-function setItem(key: string, value: string): void {
-  // Always keep the latest value in memory so the running session is correct
-  // even if the disk write fails.
+async function setItem(key: string, value: string): Promise<void> {
   memoryMirror.set(key, value);
-  try {
-    localStorage.setItem(key, value);
-  } catch (e) {
-    // QuotaExceededError or similar — never propagate; the value stays in the
-    // memory mirror for this session.
-    console.warn(`[storage] disk write failed for "${key}" (kept in memory):`, e);
+  if (IS_TAURI) {
+    try {
+      await invoke('write_data_file', { key, value });
+      return;
+    } catch (e) {
+      console.warn(`[storage] disk write failed for "${key}":`, e);
+      return;
+    }
   }
+  try { localStorage.setItem(key, value); }
+  catch (e) { console.warn(`[storage] localStorage write failed for "${key}":`, e); }
 }
 
-function removeItem(key: string): void {
+async function removeItem(key: string): Promise<void> {
   memoryMirror.delete(key);
-  try {
-    localStorage.removeItem(key);
-  } catch {
-    /* ignore */
+  if (IS_TAURI) {
+    try { await invoke('remove_data_file', { key }); } catch { /* ignore */ }
+    try { localStorage.removeItem(key); } catch { /* ignore */ }
+    return;
   }
+  try { localStorage.removeItem(key); } catch { /* ignore */ }
 }
 
-/** Zustand-compatible, crash-proof, device-backed storage. */
-export const deviceStorage = createJSONStorage(() => ({ getItem, setItem, removeItem }));
+/** Remove a storage key from both files and localStorage. */
+export async function clearStorageKey(key: string): Promise<void> {
+  return removeItem(key);
+}
+
+/** Zustand-compatible async device-backed storage. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const deviceStorage = createJSONStorage<any>(() => ({
+  getItem,
+  setItem,
+  removeItem,
+}));

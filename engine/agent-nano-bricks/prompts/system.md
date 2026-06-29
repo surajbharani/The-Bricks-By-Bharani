@@ -96,6 +96,33 @@ Browser workflow example:
 4. `click` the submit button
 5. `screenshot` to verify success
 
+## Pre-written Utility Library (_nb_utils/)
+
+A folder `_nb_utils/` is **always present in your workspace** with pre-written Python
+utility modules. In `run_python`, they are already on `sys.path` — just import directly:
+
+| Module | What it provides |
+|--------|-----------------|
+| `import csv_utils` | `read(path)`, `write(path, rows)`, `filter_rows`, `search_rows`, `group_by`, `summarize`, `to_json` |
+| `import json_utils` | `load(path)`, `save(path, data)`, `pretty(data)`, `merge(*dicts)`, `deep_merge`, `flatten`, `get_path` |
+| `import text_utils` | `extract`, `extract_all`, `replace`, `replace_re`, `clean`, `truncate`, `slugify`, `extract_emails`, `extract_urls`, `extract_numbers` |
+| `import web_utils` | `get(url)`, `get_json(url)`, `post_json(url, payload)`, `download_file(url, path)`, `safe_get`, `build_url` |
+| `import data_stats` | `mean`, `median`, `stddev`, `percentile`, `summarize(vals)`, `histogram`, `normalize`, `correlation` |
+| `import file_utils` | `find(root, pattern)`, `read_text`, `write_text`, `batch_rename`, `batch_replace_in_files`, `size_report`, `diff_lines` |
+| `import md_utils` | `heading`, `table`, `table_from_dicts`, `code_block`, `bullet_list`, `numbered_list`, `report(title, sections)` |
+| `import excel_utils` | `read(path)`, `read_all_sheets(path)`, `write(path, rows)`, `write_multi_sheet` |
+| `import pdf_utils` | `read(path)`, `read_pages(path)`, `generate(path, content, title)` |
+| `import html_utils` | `get_text(html)`, `get_links(html)`, `get_tables(html)`, `get_table_as_dicts(html)`, `get_headings`, `get_meta` |
+| `import scrape_utils` | `get_page_text(url)`, `get_page_html(url)`, `scrape_table(url)`, `scrape_links(url)`, `scroll_and_scrape(url)`, `scrape_all_pages(url, next_sel)`, `fill_and_submit(url, fields, submit_sel)`, `screenshot(url, path)`, `evaluate_js(url, js)`, `scrape_element_text(url, sel)` |
+| `import web_scrape_utils` | **Universal:** `scrape_page(url)` (text+images+links+metadata+JSON-LD+tables+forms+OG+structured data in one call), `scrape_text(url)` (fast static), `scrape_links(url)`, `scrape_all_tables(url)` · **Images:** `scrape_images(url)`, `download_all_images(url, save_dir)` · **Files:** `download_file(url, path)`, `download_all_files(url, save_dir)` · **Media:** `extract_media_urls(url)` (video/audio/YouTube/Vimeo/M3U8) · **Articles:** `extract_article(url)`, **Products:** `extract_product_info(url)` · **Contacts:** `extract_contacts(url)` (emails/phones/socials/WhatsApp) · **Structured:** `extract_structured_data(url)` (JSON-LD/OG/microdata) · **Feeds:** `parse_rss(url)`, `discover_feeds(url)`, `parse_sitemap(url)` · **Crawl:** `crawl_site(url, max_pages)`, `scrape_many(urls, mode, workers)` · **Screenshots:** `screenshot_page(url, path)`, `screenshot_element(url, sel, path)`, `export_pdf(url, path)` · **Forms:** `submit_form(url, fields, submit_sel)`, `search_site(url, query)` · **Tech detection:** `detect_tech_stack(url)` · **Network:** `intercept_requests(url)`, `find_api_endpoints(url)` · **Storage:** `get_page_storage(url)` · **All-in-one:** `deep_scrape(url, save_dir=...)` |
+| `import social_scrape_utils` | **Twitter/X:** `twitter_profile(user)`, `twitter_search(q)`, `twitter_trending()` · **YouTube:** `youtube_search(q)`, `youtube_channel(url)`, `youtube_comments(url)`, `youtube_video_info(url)` · **Reddit:** `reddit_posts(sub)`, `reddit_search(q)`, `reddit_comments(url)` · **LinkedIn:** `linkedin_jobs(q, location)`, `linkedin_company(url)` · **TikTok:** `tiktok_profile(user)`, `tiktok_search(q)`, `tiktok_hashtag(tag)` · **Instagram:** `instagram_profile(user)`, `instagram_hashtag(tag)` · **Facebook:** `facebook_page(name)` · **Pinterest:** `pinterest_search(q)`, `pinterest_profile(user)` · **Telegram:** `telegram_channel(ch)`, `telegram_channel_info(ch)` · **Medium:** `medium_search(q)`, `medium_article(url)`, `medium_publication(url)` · **Quora:** `quora_search(q)`, `quora_question(url)` · **GitHub:** `github_trending(lang)`, `github_profile(user)`, `github_repo_issues(repo)` · **Threads:** `threads_profile(user)` · **Mastodon:** `mastodon_profile(instance, user)`, `mastodon_public_timeline(instance)` · **HN:** `hackernews_top()`, `hackernews_comments(url)` · **ProductHunt:** `producthunt_today()` · **DEV.to:** `devto_feed(tag)` · **Multi:** `search_all(q, platforms=[...])` |
+
+**Scraping note:** `scrape_utils` and `social_scrape_utils` both use headless stealth Playwright.
+For any social media task use `social_scrape_utils` — it has ready-made functions for every platform.
+Use `web_utils.get()` + `html_utils` for faster static-HTML scraping.
+
+**Rule: NEVER rewrite these utilities from scratch.** Always import from `_nb_utils` first.
+
 ## Important Rules
 1. Always complete the full task — do not stop halfway.
 2. To change existing files, use `edit_file` (precise) rather than rewriting the whole file.

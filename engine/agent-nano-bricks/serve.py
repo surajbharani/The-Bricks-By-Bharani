@@ -32,6 +32,7 @@ Protocol (stdin → stdout):
     {"t": "error",      "message": "..."}
 """
 import json
+import shutil
 import sys
 import os
 from pathlib import Path
@@ -97,6 +98,7 @@ def main() -> None:
     deepseek_key   = req.get("deepseek_key", "")
     caps           = req.get("caps", {})
     action         = req.get("action", "run")
+    attachments    = req.get("attachments", [])
 
     # ── Undo: restore the workspace to before the last (or given) run ─────────
     if action == "undo":
@@ -114,9 +116,19 @@ def main() -> None:
     caps.setdefault("max_steps", 60)
     caps.setdefault("max_concurrency", 6)
 
-    if not query:
+    if not query.strip() and not attachments:
         _emit_error("Query is empty.")
         return
+
+    # Inject attachment context into the query so the agent knows the files exist
+    if attachments:
+        lines = ["", "", "### Attached files (already copied into your workspace):"]
+        for a in attachments:
+            path = a.get("path", a.get("name", ""))
+            kind = a.get("kind", "file")
+            lines.append(f"- `{path}` ({kind})")
+        lines.append("Use `describe_image` for images or `read_document` for documents. Reference them by the path shown above.")
+        query = query + "\n".join(lines)
 
     # ── Build client ──────────────────────────────────────────────────────────
     from providers.proxy import make_client, make_openrouter_client, make_deepseek_client, normalize_model
@@ -143,6 +155,16 @@ def main() -> None:
         return
 
     workspace.mkdir(parents=True, exist_ok=True)
+
+    # ── Pre-written utility library → workspace/_nb_utils/ ───────────────────
+    # Copy the bundled nb_utils/ folder into the workspace so the agent can do
+    # `import csv_utils` (etc.) without writing boilerplate helper code itself.
+    try:
+        _nb_src = Path(__file__).parent / "nb_utils"
+        if _nb_src.is_dir():
+            shutil.copytree(str(_nb_src), str(workspace / "_nb_utils"), dirs_exist_ok=True)
+    except Exception:
+        pass
 
     # ── Persistent memory + skills (per-user, derived from the auth token) ────
     memory = None

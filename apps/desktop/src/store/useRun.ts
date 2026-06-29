@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AgentEvent } from '@nano-bricks/shared';
-import { deviceStorage } from '../lib/storage';
+import { deviceStorage, clearStorageKey } from '../lib/storage';
 
 export interface RunStep {
   i: number;
@@ -63,6 +63,7 @@ interface RunState {
   errorMsg: string;
   pendingAsk: PendingAsk | null;
   lastCheckpoint: string | null;
+  workspaceDir: string;
 
   // Persistent within the session — survives individual run resets
   agentHistory: AgentHistoryItem[];
@@ -91,6 +92,7 @@ const INITIAL: Omit<RunState, 'startRun' | 'applyEvent' | 'resetRun' | 'clearAsk
   errorMsg: '',
   pendingAsk: null,
   lastCheckpoint: null,
+  workspaceDir: '',
 };
 
 export const useRun = create<RunState>()(
@@ -146,6 +148,9 @@ export const useRun = create<RunState>()(
           }
           return { toolCalls: calls };
         }
+
+        case 'workspace_dir':
+          return { workspaceDir: event.path };
 
         case 'file':
           return {
@@ -231,7 +236,7 @@ export const useRun = create<RunState>()(
       onRehydrateStorage: () => (_state, error) => {
         if (error) {
           console.error('[useRun] Failed to rehydrate, clearing store:', error);
-          localStorage.removeItem('nano-bricks-run');
+          clearStorageKey('nano-bricks-run').catch(() => {});
         }
       },
     }

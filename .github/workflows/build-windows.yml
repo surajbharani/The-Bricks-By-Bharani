@@ -103,10 +103,17 @@ jobs:
         run: tauri build --target x86_64-pc-windows-msvc
 
       # ── Upload artifacts ────────────────────────────────────────────────────
+      - name: Compute artifact label
+        shell: bash
+        run: |
+          LABEL="${{ github.ref_name || inputs.version }}"
+          LABEL="${LABEL//\//-}"
+          echo "ARTIFACT_LABEL=$LABEL" >> "$GITHUB_ENV"
+
       - name: Upload NSIS installer
         uses: actions/upload-artifact@v4
         with:
-          name: nano-bricks-windows-${{ github.ref_name || inputs.version }}
+          name: nano-bricks-windows-${{ env.ARTIFACT_LABEL }}
           retention-days: 30
           path: |
             apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
@@ -115,7 +122,7 @@ jobs:
       - name: Upload MSI (if present)
         uses: actions/upload-artifact@v4
         with:
-          name: nano-bricks-windows-msi-${{ github.ref_name || inputs.version }}
+          name: nano-bricks-windows-msi-${{ env.ARTIFACT_LABEL }}
           retention-days: 30
           if-no-files-found: ignore
           path: |
