@@ -12,7 +12,7 @@ import { AskPrompt } from './AskPrompt';
 import { UndoButton } from './UndoButton';
 
 export function RunView() {
-  const { status, query, plan, thinking, steps, subagents, tokenStream, files, summary, errorMsg, tokensUsed, inr, agentHistory } =
+  const { status, query, plan, thinking, steps, subagents, tokenStream, files, summary, errorMsg, tokensUsed, inr, agentHistory, workspaceDir } =
     useRun();
   const { agentMode, model } = useSession();
   const { saveAgentRun } = useHistory();
@@ -175,7 +175,7 @@ export function RunView() {
         <TokenStream text={tokenStream} streaming={isActive} />
 
         {/* File activity */}
-        <WorkspaceTree files={files} />
+        <WorkspaceTree files={files} workspaceDir={workspaceDir} />
 
         {/* Human-in-the-loop prompt (question / approval) */}
         <AskPrompt />

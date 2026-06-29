@@ -98,6 +98,7 @@ def main() -> None:
     deepseek_key   = req.get("deepseek_key", "")
     caps           = req.get("caps", {})
     action         = req.get("action", "run")
+    attachments    = req.get("attachments", [])
 
     # ── Undo: restore the workspace to before the last (or given) run ─────────
     if action == "undo":
@@ -115,7 +116,17 @@ def main() -> None:
     caps.setdefault("max_steps", 60)
     caps.setdefault("max_concurrency", 6)
 
-    if not query:
+    # Inject attachment context into the query so the agent knows the files exist
+    if attachments:
+        lines = ["\n\n### Attached files (already copied into your workspace):"]
+        for a in attachments:
+            path = a.get("path", a.get("name", ""))
+            kind = a.get("kind", "file")
+            lines.append(f"- `{path}` ({kind})")
+        lines.append("Use `describe_image` for images or `read_document` for documents. Reference them by the path shown above.")
+        query = query + "\n".join(lines)
+
+    if not query.strip():
         _emit_error("Query is empty.")
         return
 

@@ -4,6 +4,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
+use base64::Engine as _;
 
 // Shared handle to the currently-running sidecar so a separate command can
 // write the user's answer to its stdin (human-in-the-loop ask_user / approvals).
@@ -22,6 +23,7 @@ pub struct AgentRunRequest {
     pub caps: serde_json::Value,
     pub action: Option<String>,
     pub checkpoint: Option<String>,
+    pub attachments: Option<serde_json::Value>,
 }
 
 // Commands are NOT pub — tauri v2 generate_handler! sees pub commands as both
@@ -36,6 +38,10 @@ async fn agent_run(app: AppHandle, state: State<'_, AgentChild>, request: AgentR
     };
     std::fs::create_dir_all(&workspace).ok();
 
+    // Notify frontend of the resolved workspace path before streaming events
+    let ws_dir_event = serde_json::json!({"t": "workspace_dir", "path": workspace.to_string_lossy()}).to_string();
+    let _ = app.emit("agent-event", &ws_dir_event);
+
     let req_json = serde_json::json!({
         "query":          request.query,
         "mode":           request.mode,
@@ -47,6 +53,7 @@ async fn agent_run(app: AppHandle, state: State<'_, AgentChild>, request: AgentR
         "caps":           request.caps,
         "action":         request.action.unwrap_or_else(|| "run".to_string()),
         "checkpoint":     request.checkpoint.unwrap_or_default(),
+        "attachments":    request.attachments.unwrap_or(serde_json::json!([])),
     })
     .to_string();
 
@@ -171,6 +178,28 @@ fn run_code(lang: String, code: String) -> Result<String, String> {
     Ok(truncated)
 }
 
+/// Write a base64-encoded file into the agent workspace.
+/// Returns the full absolute path of the written file.
+#[tauri::command]
+async fn write_to_workspace(filename: String, data_b64: String) -> Result<String, String> {
+    let workspace = dirs::document_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("Nano Bricks");
+    std::fs::create_dir_all(&workspace).map_err(|e| e.to_string())?;
+    // Strip data URL prefix (e.g. "data:image/png;base64,") if present
+    let b64 = if let Some(idx) = data_b64.find(',') { &data_b64[idx + 1..] } else { &data_b64 };
+    let bytes = base64::engine::general_purpose::STANDARD.decode(b64).map_err(|e| e.to_string())?;
+    let dest = workspace.join(&filename);
+    std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
+/// Read a file from the agent workspace and return its bytes for download.
+#[tauri::command]
+async fn read_workspace_file(path: String) -> Result<Vec<u8>, String> {
+    std::fs::read(&path).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -188,7 +217,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![agent_run, agent_answer, agent_stop, run_code])
+        .invoke_handler(tauri::generate_handler![agent_run, agent_answer, agent_stop, run_code, write_to_workspace, read_workspace_file])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

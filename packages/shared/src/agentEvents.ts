@@ -11,4 +11,5 @@ export type AgentEvent =
   | { t: 'checkpoint'; id: string; label?: string }
   | { t: 'ask'; id: string; question: string; kind?: 'question' | 'approval'; options?: string[] }
   | { t: 'done'; ok: boolean; summary: string; tokensUsed: number }
-  | { t: 'error'; message: string };
+  | { t: 'error'; message: string }
+  | { t: 'workspace_dir'; path: string };

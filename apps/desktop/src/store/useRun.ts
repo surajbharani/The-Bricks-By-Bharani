@@ -63,6 +63,7 @@ interface RunState {
   errorMsg: string;
   pendingAsk: PendingAsk | null;
   lastCheckpoint: string | null;
+  workspaceDir: string;
 
   // Persistent within the session — survives individual run resets
   agentHistory: AgentHistoryItem[];
@@ -91,6 +92,7 @@ const INITIAL: Omit<RunState, 'startRun' | 'applyEvent' | 'resetRun' | 'clearAsk
   errorMsg: '',
   pendingAsk: null,
   lastCheckpoint: null,
+  workspaceDir: '',
 };
 
 export const useRun = create<RunState>()(
@@ -146,6 +148,9 @@ export const useRun = create<RunState>()(
           }
           return { toolCalls: calls };
         }
+
+        case 'workspace_dir':
+          return { workspaceDir: event.path };
 
         case 'file':
           return {
