@@ -114,9 +114,10 @@ utility modules. In `run_python`, they are already on `sys.path` — just import
 | `import pdf_utils` | `read(path)`, `read_pages(path)`, `generate(path, content, title)` |
 | `import html_utils` | `get_text(html)`, `get_links(html)`, `get_tables(html)`, `get_table_as_dicts(html)`, `get_headings`, `get_meta` |
 | `import scrape_utils` | `get_page_text(url)`, `get_page_html(url)`, `scrape_table(url)`, `scrape_links(url)`, `scroll_and_scrape(url)`, `scrape_all_pages(url, next_sel)`, `fill_and_submit(url, fields, submit_sel)`, `screenshot(url, path)`, `evaluate_js(url, js)`, `scrape_element_text(url, sel)` |
+| `import social_scrape_utils` | **Twitter/X:** `twitter_profile(user)`, `twitter_search(q)`, `twitter_trending()` · **YouTube:** `youtube_search(q)`, `youtube_channel(url)`, `youtube_comments(url)`, `youtube_video_info(url)` · **Reddit:** `reddit_posts(sub)`, `reddit_search(q)`, `reddit_comments(url)` · **LinkedIn:** `linkedin_jobs(q, location)`, `linkedin_company(url)` · **TikTok:** `tiktok_profile(user)`, `tiktok_search(q)`, `tiktok_hashtag(tag)` · **Instagram:** `instagram_profile(user)`, `instagram_hashtag(tag)` · **Facebook:** `facebook_page(name)` · **Pinterest:** `pinterest_search(q)`, `pinterest_profile(user)` · **Telegram:** `telegram_channel(ch)`, `telegram_channel_info(ch)` · **Medium:** `medium_search(q)`, `medium_article(url)`, `medium_publication(url)` · **Quora:** `quora_search(q)`, `quora_question(url)` · **GitHub:** `github_trending(lang)`, `github_profile(user)`, `github_repo_issues(repo)` · **Threads:** `threads_profile(user)` · **Mastodon:** `mastodon_profile(instance, user)`, `mastodon_public_timeline(instance)` · **HN:** `hackernews_top()`, `hackernews_comments(url)` · **ProductHunt:** `producthunt_today()` · **DEV.to:** `devto_feed(tag)` · **Multi:** `search_all(q, platforms=[...])` |
 
-**Scraping note:** `scrape_utils` uses headless Playwright (same engine as `browser_action`).
-Use it for JS-rendered pages, paginated results, infinite scroll, and form submissions.
+**Scraping note:** `scrape_utils` and `social_scrape_utils` both use headless stealth Playwright.
+For any social media task use `social_scrape_utils` — it has ready-made functions for every platform.
 Use `web_utils.get()` + `html_utils` for faster static-HTML scraping.
 
 **Rule: NEVER rewrite these utilities from scratch.** Always import from `_nb_utils` first.
