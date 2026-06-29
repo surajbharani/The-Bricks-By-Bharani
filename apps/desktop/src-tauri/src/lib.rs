@@ -107,7 +107,12 @@ fn agent_answer(state: State<'_, AgentChild>, answer: String) -> Result<(), Stri
 }
 
 #[tauri::command]
-fn agent_stop() {}
+fn agent_stop(state: State<'_, AgentChild>) {
+    let mut guard = state.0.lock().unwrap();
+    if let Some(child) = guard.take() {
+        child.kill().ok();
+    }
+}
 
 #[tauri::command]
 fn run_code(lang: String, code: String) -> Result<String, String> {

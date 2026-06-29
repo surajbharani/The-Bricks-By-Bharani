@@ -348,8 +348,9 @@ def run_solo(
 
                 emit_tool_result(fn_name, _summarize_result(result), result.get("ok", False))
 
-                if fn_name in ("write_file", "edit_file", "multi_edit") and result.get("ok"):
-                    emit_file(result.get("path", fn_args.get("path", "")), result.get("action", "edit"))
+                if fn_name in ("write_file", "edit_file", "multi_edit", "append_file", "generate_document") and result.get("ok"):
+                    action = result.get("action", "write" if fn_name == "generate_document" else "edit")
+                    emit_file(result.get("path", fn_args.get("path", "")), action)
 
                 # ── Stuck/loop detection — same failing call over and over ──────
                 sig = f"{fn_name}:{tc['function']['arguments']}"
